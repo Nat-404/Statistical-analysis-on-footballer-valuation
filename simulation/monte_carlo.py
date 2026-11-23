@@ -28,7 +28,7 @@ K = len(config.STATES)
 FAMILY_INDEX = hmm.FAMILIES
 QUARTER_MATCHES = 13          # matchs de championnat par trimestre, en moyenne
 CLUB_MEAN_REVERSION = 0.15    # vitesse à laquelle l'Elo d'un club revient vers son niveau habituel
-RESID_SCALE = 0.5             # part du bruit de réputation simulé (calibrée à l'étape 13)
+RESID_SCALE = 0.75            # niveau de bruit retenu par la validation 2020 -> 2026 (couverture 80 % ≈ 83 %)
 
 
 class Context:
@@ -132,6 +132,10 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
 
     share_edges = np.array(hmm.SHARE_BINS)
     centering = val["contract_centering"]
+    # Niveau du marché figé à la DATE DE DÉPART ("sans inflation" = aux prix du
+    # marché au moment du départ) ; l'inflation future est ajoutée à part.
+    # (borné aux saisons connues du modèle dynamique, qui commence un an après les données)
+    market_season = str(int(np.clip(int(last.season), val.get("dyn_first_season", 2015), val["last_season"])))
 
     def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag, quarter=4,
                  league=last.league):
@@ -144,7 +148,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
             "family": last.family, "age_c": min(age - 26, 14), "elo_c": (elo - 1600) / 100,
             "league": league, "log_views": last.log_views, "has_views": last.has_views,
             "national": national_flag, "eu": last.eu, "left_foot": last.left_foot,
-            "height_c": last.height_c, "season": str(val["last_season"]), "quarter": quarter,
+            "height_c": last.height_c, "season": market_season, "quarter": quarter,
         })
         for col, (lo_c, hi_c) in valuation.CONTRACT_BINS.items():
             feat[col] = ((contract > lo_c) & (contract <= hi_c)).astype(float) - centering[col]

@@ -154,7 +154,8 @@ def fit(cutoff_t=None, states=None):
     inflation = {"index": index, "drift": float(np.mean(steps)), "vol": float(np.std(steps))}
     return {"model": model, "dynamic": dynamic, "annual_sd": float(np.sqrt(dynamic.scale)),
             "resid_persistence": resid_persistence, "inflation": inflation,
-            "contract_centering": centering, "last_season": int(max(seasons))}
+            "contract_centering": centering, "last_season": int(max(seasons)),
+            "dyn_first_season": int(min(dyn.season.astype(int)))}
 
 
 def build():
