@@ -22,13 +22,13 @@ OUTPUTS_DIR = ROOT_DIR / "outputs"          # résultats finaux : rapports HTML,
 # la correspondance ici. La clé (ex. "ENG") est NOTRE nom interne.
 # -----------------------------------------------------------------------------
 LEAGUES = {
-    "ENG": {"name": "Premier League", "transfermarkt": "GB1", "understat": "ENG-Premier League", "fotmob": 47, "clubelo": "ENG"},
-    "ESP": {"name": "La Liga",        "transfermarkt": "ES1", "understat": "ESP-La Liga",        "fotmob": 87, "clubelo": "ESP"},
-    "ITA": {"name": "Serie A",        "transfermarkt": "IT1", "understat": "ITA-Serie A",        "fotmob": 55, "clubelo": "ITA"},
-    "GER": {"name": "Bundesliga",     "transfermarkt": "L1",  "understat": "GER-Bundesliga",     "fotmob": 54, "clubelo": "GER"},
-    "FRA": {"name": "Ligue 1",        "transfermarkt": "FR1", "understat": "FRA-Ligue 1",        "fotmob": 53, "clubelo": "FRA"},
+    "ENG": {"name": "Premier League", "transfermarkt": "GB1", "fotmob": 47},
+    "ESP": {"name": "La Liga",        "transfermarkt": "ES1", "fotmob": 87},
+    "ITA": {"name": "Serie A",        "transfermarkt": "IT1", "fotmob": 55},
+    "GER": {"name": "Bundesliga",     "transfermarkt": "L1",  "fotmob": 54},
+    "FRA": {"name": "Ligue 1",        "transfermarkt": "FR1", "fotmob": 53},
 }
-# Les 2es divisions : absentes de Transfermarkt (matchs) et d'Understat,
+# Les 2es divisions : absentes de Transfermarkt (matchs),
 # elles viendront de FotMob. Elles servent à suivre les joueurs relégués,
 # prêtés ou en train d'éclore avant d'arriver en 1re division.
 SECOND_DIVISIONS = {
@@ -43,7 +43,7 @@ SECOND_DIVISIONS = {
 # -----------------------------------------------------------------------------
 # 3. Saisons étudiées
 # Une saison est désignée par son année de DÉBUT : 2019 = saison 2019/20.
-# Understat commence en 2014/15, c'est donc notre point de départ commun.
+# Les données Transfermarkt exploitables commencent en 2014/15 : c'est notre point de départ.
 # -----------------------------------------------------------------------------
 FIRST_SEASON = 2014    # première saison utilisée pour apprendre les modèles
 CURRENT_SEASON = 2026  # saison en cours (2026/27) : point de départ des prévisions
@@ -51,7 +51,7 @@ CURRENT_SEASON = 2026  # saison en cours (2026/27) : point de départ des prévi
 # La base Transfermarkt est figée : dernières valeurs marchandes au 12/06/2026,
 # derniers matchs au 06/07/2026. Les prévisions partent donc du début de la
 # saison 2026/27 (1er juillet 2026). Les performances 2026/27 déjà jouées
-# viendront d'Understat et FotMob, qui sont à jour.
+# viennent de FotMob (récupération à la demande), qui est à jour.
 TM_SNAPSHOT_DATE = "2026-07-06"
 FORECAST_ORIGIN = "2026-07-01"
 

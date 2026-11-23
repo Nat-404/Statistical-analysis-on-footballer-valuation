@@ -1,11 +1,11 @@
 # =============================================================================
 # Main.py — Point d'entrée : analyse complète d'un joueur.
 #
-#     python Main.py "Bukayo Saka"          -> rapport HTML dans outputs/
+#     python Main.py "Bukayo Saka"          -> fiche PDF de 2 pages dans outputs/
 #     python Main.py --check                -> vérifie l'installation
 #
 # Étapes : 1) trouver le joueur  2) charger les modèles entraînés
-#          3) simuler 10 000 carrières sur 6 ans  4) écrire le rapport
+#          3) simuler 10 000 carrières sur 6 ans  4) écrire la fiche PDF
 # =============================================================================
 
 import importlib

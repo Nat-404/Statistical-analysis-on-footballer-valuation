@@ -9,7 +9,6 @@ pyarrow>=17.0        # format de fichier "parquet" : sauvegarde rapide et compac
 duckdb>=1.1          # mini base de données SQL, pour lire la base Transfermarkt efficacement
 
 # --- Collecte des données ---
-soccerdata>=1.8      # accès unifié à Understat (xG) et ClubElo (force des clubs)
 requests>=2.32       # téléchargement de pages / fichiers sur internet (FotMob, Wikipédia)
 
 # --- Statistiques et modèles ---
