@@ -25,8 +25,9 @@ from tqdm import tqdm
 import config
 from collectors import transfermarkt as tm
 
-# Wikimedia demande un "User-Agent" qui décrit le programme (règle d'usage de l'API)
-HEADERS = {"User-Agent": "MarkovChainFootball/0.1 (personal research project; python-requests)"}
+# Wikimedia exige un "User-Agent" qui décrit le programme ET donne un moyen de
+# contact ; sans contact, l'API bloque très vite (erreur 429).
+HEADERS = {"User-Agent": "MarkovChainFootball/0.1 (https://github.com/Nat-404; personal research project) python-requests"}
 LANGUAGES = ["en", "fr", "es", "de", "it"]           # les langues des 5 grands championnats + anglais
 CACHE = config.CACHE_DIR / "wikipedia"
 LINKS_PATH = config.PROCESSED_DIR / "wikipedia_links.parquet"
