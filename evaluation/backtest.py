@@ -33,11 +33,15 @@ TARGET_T = ORIGIN_T + config.N_STEPS                  # mai-juillet 2026
 
 
 def fit_until(cutoff_t):
-    # Ré-entraîne toute la chaîne de modèles sur les données d'avant cutoff_t.
+    # Ré-entraîne toute la chaîne de modèles sur les données d'avant cutoff_t,
+    # y compris la calibration de la dérive (elle aussi limitée au passé).
+    from simulation import calibration
     params, states, res = hmm.fit(cutoff_t, verbose=False)
-    return {"cutoff_t": cutoff_t, "hmm_params": params, "states": states, "resilience": res,
-            "valuation": valuation.fit(cutoff_t, states), "events": events.fit(cutoff_t, states),
-            "collective": collective.fit(cutoff_t)}
+    fitted = {"cutoff_t": cutoff_t, "hmm_params": params, "states": states, "resilience": res,
+              "valuation": valuation.fit(cutoff_t, states), "events": events.fit(cutoff_t, states),
+              "collective": collective.fit(cutoff_t), "drift": None}
+    fitted["drift"], _ = calibration.calibrate(mc.Context(fitted), cutoff_t)
+    return fitted
 
 
 def test_players(n_players=400, seed=0):

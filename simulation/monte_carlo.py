@@ -53,6 +53,12 @@ class Context:
             on=["player_id", "t"], how="left")
         res = self.hmm["resilience"]
         self.resilience = dict(zip(res.player_id, res.resilience))
+        # Correction de dérive : fournie (validation) ou chargée depuis le disque
+        if fitted:
+            self.drift = fitted.get("drift")
+        else:
+            from simulation import calibration
+            self.drift = calibration.load()
 
 
 def _sample_rows(prob_rows, rng):
@@ -73,7 +79,9 @@ def adjust_for_resilience(trans, r):
 
 
 def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, origin_t=None,
-             seed=config.RANDOM_SEED, resid_scale=RESID_SCALE, resilience_override=None, live=None):
+             seed=config.RANDOM_SEED, resid_scale=RESID_SCALE, resilience_override=None, live=None,
+             drift=True):
+    # drift : applique la correction de dérive calibrée (simulation/calibration.py)
     # live : mise à jour issue des matchs récents (collectors/live.py) :
     #   {"probs": probabilités d'état mises à jour, "obs": observations par trimestre}
     ctx = ctx or Context()
@@ -231,6 +239,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         equilibrium = effects / (1 - b_dyn)
         log_value = (log_value + (1 - c) * (equilibrium - log_value)
                      + resid_scale * quarterly_sd * rng.normal(0, 1, n))
+        if drift and ctx.drift is not None:
+            log_value = log_value + ctx.drift[age_bin, tier] / 4     # correction calibrée (par an -> par trimestre)
         infl = infl + val["inflation"]["drift"] / 4 + rng.normal(0, val["inflation"]["vol"] / 2, n)
 
         out["state"][:, h] = state
