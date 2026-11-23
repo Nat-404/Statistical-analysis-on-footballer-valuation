@@ -69,6 +69,8 @@ def _get_json(endpoint, params, cache_file):
             _last_request = time.time()
             if response.status_code == 200:
                 data = response.json()
+                if isinstance(data, dict) and data.get("error"):
+                    return None          # ex. « Data not found » : on ne met pas une erreur en cache
                 break
             if response.status_code == 404:   # la ressource n'existe pas : inutile d'insister
                 return None
@@ -222,7 +224,7 @@ def collect_league_season(league_key, league_id, season):
             # en cache, il sera retenté automatiquement au prochain lancement.
             tqdm.write(f"⚠ match {match_id} sauté ({error})")
             continue
-        if match is None:
+        if match is None or "general" not in match:   # match sans données chez FotMob
             continue
         players += parse_player_stats(match)
         shots += parse_shots(match)
