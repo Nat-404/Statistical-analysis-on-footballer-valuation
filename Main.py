@@ -80,8 +80,13 @@ def main():
             print("  aucune donnée récente trouvée (départ en juillet 2026)")
 
     print(f"Simulation de {config.N_SIMULATIONS:,} carrières…")
-    path, sim = report.build_report(player_id, ctx, live=live)
-    print(f"✓ Rapport : {path}")
+    sim = mc.simulate(player_id, ctx, live=live)
+    from reporting import fiche
+    pdf = fiche.build_fiche(player_id, ctx, sim, live=live)
+    print(f"✓ Fiche de projection (2 pages) : {pdf}")
+    if "--html" in sys.argv:                    # page web interactive détaillée, en option
+        path, _ = report.build_report(player_id, ctx, live=live)
+        print(f"✓ Rapport interactif : {path}")
 
 
 if __name__ == "__main__":

@@ -146,6 +146,29 @@ def filter_update(start_probs, obs, params, cls):
     return probs
 
 
+def season_stats(name, age, league_key, season):
+    # Statistiques FotMob d'un joueur sur une saison complète d'UN championnat
+    # (xG, xA, occasions créées...), pour la présentation de la fiche.
+    matches, players, _, lineups = fm.load_season(league_key, season)
+    if players.empty:
+        return None
+    fm_id = find_fotmob_id(name, age, lineups)
+    if fm_id is None:
+        return None
+    me = players[players.player_id == fm_id]
+
+    def total(col):
+        return float(pd.to_numeric(me[col], errors="coerce").fillna(0).sum()) if col in me else np.nan
+
+    minutes = total("minutes_played")
+    rating = pd.to_numeric(me.get("fotmob_rating"), errors="coerce")
+    return {"matches": int((pd.to_numeric(me.minutes_played, errors="coerce").fillna(0) > 0).sum()),
+            "minutes": minutes, "xg": total("expected_goals_xg"), "xa": total("expected_assists_xa"),
+            "chances": total("chances_created"), "dribbles": total("successful_dribbles"),
+            "rating": float((rating * pd.to_numeric(me.minutes_played, errors="coerce")).sum() / minutes)
+            if minutes else np.nan}
+
+
 def update_player(name, age, pos_group, start_probs, params, cls, refresh=True):
     # Point d'entrée : renvoie (probabilités d'état mises à jour, observations, trimestres ajoutés).
     if refresh:
