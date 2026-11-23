@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 import config
+from collectors.transfermarkt import BIG5_CODES
 from features import quarterly as qt
 from models import hmm
 
@@ -47,7 +48,7 @@ def _age_bin(age):
 
 def fit(cutoff_t=None, states=None):
     q = pd.read_parquet(qt.OUT_PATH)
-    s = (states if states is not None else pd.read_parquet(hmm.STATES_PATH))[["player_id", "t", "state"]]
+    s = (states if states is not None else pd.read_parquet(hmm.STATES_PATH))[["player_id", "t", "state", "tier"]]
     df = q.merge(s, on=["player_id", "t"]).sort_values(["player_id", "t"])
     if cutoff_t is not None:
         df = df[df.t <= cutoff_t]
@@ -94,9 +95,46 @@ def fit(cutoff_t=None, states=None):
     # 4. Discipline : cartons rouges par 1 000 minutes (moyenne générale)
     red_rate = float(df.red.sum() / df.minutes.sum() * 1000)
 
+    # 5. DESTINATION d'un transfert : rester dans le même championnat, rejoindre un
+    #    autre grand championnat, ou quitter le top 5 (Arabie saoudite, MLS, Turquie,
+    #    2e division...). Mesuré par tranche d'âge : à 31 ans, on part plus souvent hors top 5.
+    big5 = set(BIG5_CODES)
+    df["league_cat"] = np.where(df.league_id.isin(big5), df.league_id, "autre")
+    df["next_cat"] = df.groupby("player_id").league_cat.shift(-2)       # 2 trimestres après le départ
+    #    ... et selon le NIVEAU DE TALENT (une star part rarement hors du top 5).
+    m = df[df.moved & df.league_cat.isin(big5) & df.next_cat.notna()]
+
+    def shares(g):
+        return np.array([(g.next_cat == g.league_cat).sum(),
+                         (g.next_cat.isin(big5) & (g.next_cat != g.league_cat)).sum(),
+                         (g.next_cat == "autre").sum()], dtype=float)
+
+    base_dest = shares(m) / max(len(m), 1)
+    dest = np.zeros((n_age, hmm.N_TIERS, 3))                             # [même, autre top 5, hors top 5]
+    for ab in range(n_age):
+        for tr in range(hmm.N_TIERS):
+            counts = shares(m[(m.age_bin == ab) & (m.tier == tr)])
+            dest[ab, tr] = (counts + 20 * base_dest) / (counts.sum() + 20)
+
+    # Retour dans le top 5 d'un joueur parti hors top 5 (prêts, retours...), par âge
+    out_movers = df[df.moved & (df.league_cat == "autre") & df.next_cat.notna()
+                    & df.player_id.isin(df.loc[df.league_cat.isin(big5), "player_id"])]
+    base_ret = out_movers.next_cat.isin(big5).mean() if len(out_movers) else 0.2
+    comeback = np.array([(out_movers[out_movers.age_bin == ab].next_cat.isin(big5).sum() + 20 * base_ret)
+                         / ((out_movers.age_bin == ab).sum() + 20) for ab in range(n_age)])
+
+    # 6. Seuils de valeur des niveaux de talent (60e et 90e centiles par tranche
+    #    d'âge, sur les 3 dernières saisons connues) : servent à recalculer le
+    #    niveau de talent pendant la simulation à partir de la valeur simulée.
+    recent = df[(df.season >= df.season.max() - 2) & (df.market_value > 0)]
+    tier_cuts = np.array([recent[recent.age_bin == ab].market_value.quantile(hmm.TIER_CUTS).to_numpy()
+                          if (recent.age_bin == ab).sum() > 50 else [np.inf, np.inf]
+                          for ab in range(n_age)])
+
     return {"move": move, "elo_jump": elo_jump, "elo_sd": elo_sd, "national": national,
             "red_rate_per_1000": red_rate, "contract": CONTRACT_ASSUMPTIONS,
-            "tournament_quarters": TOURNAMENTS}
+            "tournament_quarters": TOURNAMENTS, "destination": dest, "comeback": comeback,
+            "tier_cuts": tier_cuts}
 
 
 # Grands tournois à venir dans l'horizon, en (saison, trimestre) :

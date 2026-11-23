@@ -92,7 +92,12 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     f0 = f0 / f0.sum() if np.isfinite(f0).all() and f0.sum() > 0 else np.eye(K)[hmm.TITULAIRE]
     r = resilience_override or ctx.resilience.get(player_id, 1.0)
     family = FAMILY_INDEX[last.pos_group]
-    tier = int(last.tier) if pd.notna(last.tier) else 0     # niveau de talent au départ (fixe)
+    # Niveau de talent : celui du départ, puis RECALCULÉ chaque année à partir de
+    # la valeur simulée (une star dont la valeur s'effondre perd son statut).
+    tier = np.full(n, int(last.tier) if pd.notna(last.tier) else 0)
+    # Championnat : peut changer lors d'un transfert (autre top 5, ou hors top 5)
+    league = np.full(n, last.league, dtype=object)
+    big5_keys = list(config.LEAGUES)
     age0, t0 = float(last.age), int(last.t)
     live_obs = None
     if live is not None and len(live["obs"]):
@@ -120,7 +125,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     share_edges = np.array(hmm.SHARE_BINS)
     centering = val["contract_centering"]
 
-    def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag, quarter=4):
+    def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag, quarter=4,
+                 league=last.league):
         # Valeur (log) prédite par le modèle DYNAMIQUE : part de la valeur d'il y a
         # un an (log_lag) et l'ajuste selon les caractéristiques actuelles.
         feat = pd.DataFrame({
@@ -128,7 +134,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
             **{f"p_{s}": (state == k).astype(float) for k, s in enumerate(config.STATES)},
             "perf_recent": perf_recent, "share_recent": share_recent,
             "family": last.family, "age_c": min(age - 26, 14), "elo_c": (elo - 1600) / 100,
-            "league": last.league, "log_views": last.log_views, "has_views": last.has_views,
+            "league": league, "log_views": last.log_views, "has_views": last.has_views,
             "national": national_flag, "eu": last.eu, "left_foot": last.left_foot,
             "height_c": last.height_c, "season": str(val["last_season"]), "quarter": quarter,
         })
@@ -157,12 +163,15 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         season, quarter = t // 4, t % 4 + 1
         age = age0 + (h + 1) / 4
         age_bin = int(np.digitize(age, hmm.AGE_BINS[1:-1]))
-        cls = hmm.class_index(age_bin, family, tier)
+        if quarter == 1 and h > 0:
+            # Recalcul annuel du niveau de talent à partir de la valeur simulée
+            tier = np.digitize(np.exp(log_value), ev["tier_cuts"][age_bin])
+        cls = hmm.class_index(age_bin, family, tier)            # une classe par carrière
 
         # 1. Nouvel état (chaîne de Markov ajustée par la résilience)
-        A = adjust_for_resilience(params["trans"][cls], r)
+        A = adjust_for_resilience(params["trans"][cls], r)      # (n, K, K)
         prev_state = state
-        state = _sample_rows(A[state], rng)
+        state = _sample_rows(A[np.arange(n), state], rng)
 
         # 2. Temps de jeu et performance selon l'état
         b = _sample_rows(params["share"][state], rng)
@@ -194,7 +203,21 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
             elo_home[moved] = elo[moved] + jumps
         elo = elo + CLUB_MEAN_REVERSION * (elo_home - elo) + rng.normal(0, ev["elo_sd"] * 0.5, n)
         elo = np.where(moved, elo_home, elo)
-        # 3d. Grand tournoi (Euro 2028, Coupe du monde 2030)
+        # 3d. Destination du transfert : même championnat, autre grand championnat,
+        #     ou hors top 5 (fréquences réelles selon l'âge ET le niveau de talent).
+        in_big5 = np.isin(league, big5_keys)
+        movers = moved & in_big5
+        if movers.any():
+            dest = _sample_rows(ev["destination"][age_bin, tier[movers]], rng)
+            new_league = league[movers].copy()
+            other = dest == 1
+            new_league[other] = rng.choice(big5_keys, other.sum())
+            new_league[dest == 2] = "autre"
+            league[movers] = new_league
+        #     Un joueur hors top 5 qui change de club peut y revenir (prêt terminé...).
+        back = moved & ~in_big5 & (rng.random(n) < ev["comeback"][age_bin])
+        league[back] = last.league if last.league in big5_keys else rng.choice(big5_keys)
+        # 3e. Grand tournoi (Euro 2028, Coupe du monde 2030)
         if (season, quarter) in ev["tournament_quarters"]:
             plays = rng.random(n) < ev["national"][state, age_bin]
             national_last = np.where(plays, t, national_last)
@@ -204,7 +227,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         share_hist = np.column_stack([share_hist, share])[:, -4:]
         # a + effets = prédiction avec log_lag = 0 ; puis valeur d'équilibre
         effects = features(state, perf_hist.mean(axis=1), share_hist.mean(axis=1), elo, contract,
-                           (t - national_last <= 8).astype(int), age, np.zeros(n), quarter)
+                           (t - national_last <= 8).astype(int), age, np.zeros(n), quarter, league)
         equilibrium = effects / (1 - b_dyn)
         log_value = (log_value + (1 - c) * (equilibrium - log_value)
                      + resid_scale * quarterly_sd * rng.normal(0, 1, n))
@@ -223,7 +246,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     out["meta"] = {"player_id": player_id, "name": last.get("name"), "t0": t0, "age0": age0,
                    "value0": float(last.market_value), "club_elo0": float(elo_home.mean()),
                    "resilience": r, "start_probs": f0, "steps": steps, "n": n, "live_obs": live_obs,
-                   "pos_group": last.pos_group, "tier": tier}
+                   "pos_group": last.pos_group, "tier": int(last.tier) if pd.notna(last.tier) else 0,
+                   "left_top5": float(np.mean(league == "autre"))}
     return out
 
 
