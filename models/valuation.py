@@ -45,8 +45,10 @@ FORMULA = (
     " + elo_c + C(league)"
     " + c_lt1 + c_1_2 + c_2_3"
     " + log_views + has_views + national + eu + left_foot + height_c"
-    " + C(season)"
+    " + C(season) + C(quarter)"
 )
+# C(quarter) : Transfermarkt publie ses valeurs surtout à certaines périodes
+# (été, hiver) ; cet effet "calendrier" évite des dents de scie artificielles.
 # Même formule, avec en plus la valeur d'il y a un an (log_lag)
 DYNAMIC_FORMULA = FORMULA.replace("log_value ~ ", "log_value ~ log_lag + ")
 
@@ -95,10 +97,13 @@ def contract_dummies(years, centering):
     return {col: float(lo < years <= hi) - centering[col] for col, (lo, hi) in CONTRACT_BINS.items()}
 
 
-def load_training(cutoff_t=None):
+def load_training(cutoff_t=None, states=None):
+    # states : états HMM déjà calculés en mémoire (validation sur le passé) ;
+    # sinon on lit ceux du modèle complet.
     q = pd.read_parquet(qt.OUT_PATH)
     p = pd.read_parquet(pf.OUT_PATH)[["player_id", "t", "pos_group", "perf_adj"]]
-    s = pd.read_parquet(hmm.STATES_PATH)[["player_id", "t"] + [f"p_{n}" for n in config.STATES]]
+    s = states if states is not None else pd.read_parquet(hmm.STATES_PATH)
+    s = s[["player_id", "t"] + [f"p_{n}" for n in config.STATES]]
     df = q.merge(p, on=["player_id", "t"]).merge(s, on=["player_id", "t"])
     if cutoff_t is not None:
         df = df[df.t <= cutoff_t]
@@ -109,14 +114,15 @@ def load_training(cutoff_t=None):
     return df
 
 
-def fit(cutoff_t=None):
-    df = load_training(cutoff_t)
+def fit(cutoff_t=None, states=None):
+    df = load_training(cutoff_t, states)
     train = df[df.fresh & df.family.notna()].copy()
     train["season"] = train.season.astype(str)
     model = smf.ols(FORMULA, train).fit()
     # Moyennes de centrage des indicateurs de contrat (à réappliquer en simulation)
     recent = (df.season >= config.CURRENT_SEASON - 1) & df.contract_years.notna()
-    centering = {col: float(((df.contract_years > lo) & (df.contract_years <= hi))[recent].mean())
+    # (aucun contrat connu, ex. validation sur 2020 -> centrage 0 et effet contrat nul)
+    centering = {col: float(np.nan_to_num(((df.contract_years > lo) & (df.contract_years <= hi))[recent].mean()))
                  for col, (lo, hi) in CONTRACT_BINS.items()}
 
     # MODÈLE DYNAMIQUE (celui utilisé par la simulation).
@@ -153,6 +159,9 @@ def fit(cutoff_t=None):
 
 def build():
     result = fit()
+    # statsmodels garde une copie des données d'entraînement (~600 Mo) : inutile pour prédire
+    result["model"].remove_data()
+    result["dynamic"].remove_data()
     with open(MODEL_PATH, "wb") as f:
         pickle.dump(result, f)
     return result

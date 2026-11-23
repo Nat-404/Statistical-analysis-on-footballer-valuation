@@ -33,13 +33,21 @@ RESID_SCALE = 0.5             # part du bruit de réputation simulé (calibrée 
 
 class Context:
     # Charge une fois tous les modèles entraînés et les données des joueurs.
-    def __init__(self):
-        self.hmm = hmm.load()
-        self.val = valuation.load()
-        self.ev = events.load()
-        self.col = collective.load()
-        self.panel = valuation.load_training()
-        states = pd.read_parquet(hmm.STATES_PATH)
+    # fitted : modèles entraînés en mémoire (validation sur le passé) ; sinon
+    # on charge les modèles enregistrés sur le disque.
+    def __init__(self, fitted=None):
+        if fitted:
+            self.hmm = {"params": fitted["hmm_params"], "resilience": fitted["resilience"]}
+            self.val, self.ev, self.col = fitted["valuation"], fitted["events"], fitted["collective"]
+            states = fitted["states"]
+            self.panel = valuation.load_training(fitted["cutoff_t"], states)
+        else:
+            self.hmm = hmm.load()
+            self.val = valuation.load()
+            self.ev = events.load()
+            self.col = collective.load()
+            states = pd.read_parquet(hmm.STATES_PATH)
+            self.panel = valuation.load_training(states=states)
         self.panel = self.panel.merge(
             states[["player_id", "t", "tier", "cls"] + [f"f_{n}" for n in config.STATES]],
             on=["player_id", "t"], how="left")
@@ -99,7 +107,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     share_edges = np.array(hmm.SHARE_BINS)
     centering = val["contract_centering"]
 
-    def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag):
+    def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag, quarter=4):
         # Valeur (log) prédite par le modèle DYNAMIQUE : part de la valeur d'il y a
         # un an (log_lag) et l'ajuste selon les caractéristiques actuelles.
         feat = pd.DataFrame({
@@ -109,28 +117,23 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
             "family": last.family, "age_c": min(age - 26, 14), "elo_c": (elo - 1600) / 100,
             "league": last.league, "log_views": last.log_views, "has_views": last.has_views,
             "national": national_flag, "eu": last.eu, "left_foot": last.left_foot,
-            "height_c": last.height_c, "season": str(val["last_season"]),
+            "height_c": last.height_c, "season": str(val["last_season"]), "quarter": quarter,
         })
         for col, (lo_c, hi_c) in valuation.CONTRACT_BINS.items():
             feat[col] = ((contract > lo_c) & (contract <= hi_c)).astype(float) - centering[col]
         return val["dynamic"].predict(feat).to_numpy()
 
-    # Historique des valeurs (log) des 4 derniers trimestres réels : la valeur
-    # du trimestre h dépend de celle du trimestre h - 4 (un an plus tôt).
-    log_v0 = float(np.log(last.market_value)) if last.market_value > 0 else np.log(1e5)
-    past = np.log(p.market_value.where(p.market_value > 0)).tail(5).ffill().fillna(log_v0).to_numpy()
-    past = np.concatenate([np.full(5 - len(past), past[0]), past]) if len(past) < 5 else past
-    log_values = [np.full(n, v) for v in past[:-1]] + [np.full(n, log_v0)]   # t0-4 ... t0
-
-    # ANCRAGE : chaque carrière démarre EXACTEMENT à la valeur actuelle. L'écart
-    # entre la valeur réelle et celle du modèle au départ s'estompe ensuite au
-    # rythme mesuré sur les données (persistance annuelle de cet écart).
-    pred0 = features(state, perf_hist.mean(axis=1), share_hist.mean(axis=1), elo, contract,
-                     np.full(n, int(last.national)), age0, log_values[0])
-    offset = log_v0 - pred0
-    quarterly_decay = float(np.clip(val["resid_persistence"], 0, 1)) ** 0.25
-    # Bruit lisse (processus AR(1) de variance 1) mis à l'échelle de l'erreur annuelle
-    shock = rng.normal(0, 1, n)
+    # DYNAMIQUE DE LA VALEUR, trimestre par trimestre.
+    # Le modèle annuel dit : log V(dans 1 an) = a + b x log V(aujourd'hui) + effets.
+    # Sa "valeur d'équilibre" (vers laquelle il tend) est V* = (a + effets) / (1 - b).
+    # Chaque trimestre, la valeur parcourt une fraction (1 - b^(1/4)) du chemin
+    # vers V* : sur 4 trimestres, on retrouve exactement le comportement annuel.
+    # Le bruit trimestriel est choisi pour que, cumulé sur un an, il égale
+    # l'erreur annuelle mesurée.
+    b_dyn = float(val["dynamic"].params["log_lag"])
+    c = b_dyn ** 0.25
+    quarterly_sd = val["annual_sd"] / np.sqrt(1 + c ** 2 + c ** 4 + c ** 6)
+    log_value = np.full(n, float(np.log(last.market_value)) if last.market_value > 0 else np.log(1e5))
     infl = np.zeros(n)                                     # inflation cumulée depuis le départ
 
     out = {k: np.zeros((n, steps)) for k in ("state", "share", "perf", "elo", "value_real", "value_nominal",
@@ -186,12 +189,12 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         # 4. Valeur marchande
         perf_hist = np.column_stack([perf_hist, perf])[:, -4:]
         share_hist = np.column_stack([share_hist, share])[:, -4:]
-        offset = offset * quarterly_decay
-        shock = 0.9 * shock + np.sqrt(1 - 0.9 ** 2) * rng.normal(0, 1, n)
-        log_value = (features(state, perf_hist.mean(axis=1), share_hist.mean(axis=1), elo, contract,
-                              (t - national_last <= 8).astype(int), age, log_values[-4])
-                     + offset + resid_scale * val["annual_sd"] * shock)
-        log_values.append(log_value)
+        # a + effets = prédiction avec log_lag = 0 ; puis valeur d'équilibre
+        effects = features(state, perf_hist.mean(axis=1), share_hist.mean(axis=1), elo, contract,
+                           (t - national_last <= 8).astype(int), age, np.zeros(n), quarter)
+        equilibrium = effects / (1 - b_dyn)
+        log_value = (log_value + (1 - c) * (equilibrium - log_value)
+                     + resid_scale * quarterly_sd * rng.normal(0, 1, n))
         infl = infl + val["inflation"]["drift"] / 4 + rng.normal(0, val["inflation"]["vol"] / 2, n)
 
         out["state"][:, h] = state

@@ -1,61 +1,66 @@
 # =============================================================================
-# Main.py — Point d'entrée du programme.
-# Pour l'instant (étape 0), il vérifie simplement que l'installation est
-# correcte. À la fin du projet, il lancera l'analyse complète d'un joueur :
-#     python Main.py "Nom du joueur"
+# Main.py — Point d'entrée : analyse complète d'un joueur.
+#
+#     python Main.py "Bukayo Saka"          -> rapport HTML dans outputs/
+#     python Main.py --check                -> vérifie l'installation
+#
+# Étapes : 1) trouver le joueur  2) charger les modèles entraînés
+#          3) simuler 10 000 carrières sur 6 ans  4) écrire le rapport
 # =============================================================================
 
-import importlib  # permet d'importer une bibliothèque à partir de son nom (texte)
+import importlib
+import sys
+import unicodedata
 
-import config     # notre fichier de réglages
+import config
 
 
-def check_folders():
-    # Crée les dossiers de données s'ils n'existent pas encore.
-    # exist_ok=True : pas d'erreur si le dossier existe déjà.
-    # parents=True : crée aussi les dossiers parents manquants.
+def check_installation():
+    # Vérifie dossiers et bibliothèques (l'ancienne étape 0).
     for folder in [config.RAW_DIR, config.PROCESSED_DIR, config.CACHE_DIR, config.OUTPUTS_DIR]:
         folder.mkdir(parents=True, exist_ok=True)
-    print("✓ Dossiers de données en place")
-
-
-def check_libraries():
-    # Essaie d'importer chaque bibliothèque nécessaire.
-    # Si l'une manque, on l'ajoute à la liste "missing" au lieu de planter.
-    # (Le nom d'import diffère parfois du nom d'installation : scikit-learn -> sklearn)
-    libraries = ["pandas", "numpy", "pyarrow", "duckdb", "soccerdata", "requests",
-                 "scipy", "statsmodels", "sklearn", "plotly", "matplotlib", "tqdm"]
     missing = []
-    for name in libraries:
+    for name in ["pandas", "numpy", "pyarrow", "duckdb", "requests", "scipy", "statsmodels",
+                 "sklearn", "plotly", "rapidfuzz", "tqdm"]:
         try:
-            module = importlib.import_module(name)
-            version = getattr(module, "__version__", "?")  # récupère la version si elle existe
-            print(f"  ✓ {name:<12} {version}")
+            importlib.import_module(name)
         except ImportError:
             missing.append(name)
-            print(f"  ✗ {name:<12} MANQUANTE")
-    return missing
+    print("✓ Installation complète" if not missing else f"⚠ Il manque : {', '.join(missing)}")
 
 
-def show_config():
-    # Affiche un résumé des réglages, pour vérifier d'un coup d'œil.
-    print("\nRéglages du projet :")
-    print(f"  Championnats : {', '.join(l['name'] for l in config.LEAGUES.values())}")
-    print(f"  Saisons      : {config.FIRST_SEASON}/{config.FIRST_SEASON + 1} -> {config.CURRENT_SEASON}/{config.CURRENT_SEASON + 1}")
-    print(f"  Horizon      : {config.HORIZON_YEARS} ans = {config.N_STEPS} trimestres")
-    print(f"  Simulations  : {config.N_SIMULATIONS:,} carrières par joueur")
-    print(f"  États Markov : {' < '.join(config.STATES)}")
+def _normalize(text):
+    return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
 
 
-# Ce bloc ne s'exécute que si on lance directement "python Main.py"
-# (et pas si un autre fichier fait "import Main").
+def find_player(ctx, query):
+    # Cherche le joueur par son nom (sans tenir compte des accents ni des majuscules).
+    # S'il y a plusieurs résultats, on prend celui dont la valeur actuelle est la plus élevée.
+    latest = ctx.panel.sort_values("t").groupby("player_id").tail(1)
+    hits = latest[latest.name.fillna("").map(_normalize).str.contains(_normalize(query), regex=False)]
+    if hits.empty:
+        sys.exit(f"Aucun joueur trouvé pour « {query} »")
+    if len(hits) > 1:
+        print("Plusieurs joueurs correspondent :")
+        for row in hits.sort_values("market_value", ascending=False).head(5).itertuples():
+            print(f"  - {row.name} ({row.age:.0f} ans, {row.market_value / 1e6:.1f} M€)")
+    return int(hits.sort_values("market_value", ascending=False).player_id.iloc[0])
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] == "--check":
+        check_installation()
+        return
+    from reporting import report
+    from simulation import monte_carlo as mc
+
+    print("Chargement des modèles…")
+    ctx = mc.Context()
+    player_id = find_player(ctx, " ".join(sys.argv[1:]))
+    print(f"Simulation de {config.N_SIMULATIONS:,} carrières…")
+    path, sim = report.build_report(player_id, ctx)
+    print(f"✓ Rapport : {path}")
+
+
 if __name__ == "__main__":
-    print("=== Vérification de l'installation ===\n")
-    check_folders()
-    print("\nBibliothèques :")
-    missing = check_libraries()
-    show_config()
-    if missing:
-        print(f"\n⚠ Il manque : {', '.join(missing)} -> lance : pip install -r requirements.txt")
-    else:
-        print("\n✓ Tout est prêt pour l'étape 1.")
+    main()

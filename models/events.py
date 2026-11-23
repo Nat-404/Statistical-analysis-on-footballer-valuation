@@ -45,9 +45,9 @@ def _age_bin(age):
     return np.digitize(age, AGE_BINS[1:-1])
 
 
-def fit(cutoff_t=None):
+def fit(cutoff_t=None, states=None):
     q = pd.read_parquet(qt.OUT_PATH)
-    s = pd.read_parquet(hmm.STATES_PATH)[["player_id", "t", "state"]]
+    s = (states if states is not None else pd.read_parquet(hmm.STATES_PATH))[["player_id", "t", "state"]]
     df = q.merge(s, on=["player_id", "t"]).sort_values(["player_id", "t"])
     if cutoff_t is not None:
         df = df[df.t <= cutoff_t]
