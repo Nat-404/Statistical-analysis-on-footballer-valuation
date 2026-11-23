@@ -1,4 +1,4 @@
-# MarkovChain Football
+# Statistical analysis on footballer valuation
 
 Football player market-value forecasting over a 6-year horizon: a quarterly hidden Markov model of
 career states (injured → elite), event sub-models (transfers, contracts, tournaments) and a
