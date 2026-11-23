@@ -83,7 +83,7 @@ def main():
     sim = mc.simulate(player_id, ctx, live=live)
     from reporting import fiche
     pdf = fiche.build_fiche(player_id, ctx, sim, live=live)
-    print(f"✓ Fiche de projection (2 pages) : {pdf}")
+    print(f"✓ Fiche de projection (2 pages, anglais) : {pdf}")
     if "--html" in sys.argv:                    # page web interactive détaillée, en option
         path, _ = report.build_report(player_id, ctx, live=live)
         print(f"✓ Rapport interactif : {path}")
