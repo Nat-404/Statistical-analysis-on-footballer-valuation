@@ -1,0 +1,19 @@
+# Fichiers que git doit ignorer (ne pas versionner)
+
+# Environnement Python virtuel : se recrée avec requirements.txt
+.venv/
+
+# Fichiers compilés automatiquement par Python
+__pycache__/
+*.pyc
+
+# Données : trop volumineuses, et se re-téléchargent avec les collecteurs
+data/raw/
+data/processed/
+data/cache/
+
+# Résultats générés
+outputs/
+
+# Fichiers système macOS
+.DS_Store

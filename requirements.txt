@@ -1,0 +1,25 @@
+# Liste des bibliothèques Python dont le projet a besoin.
+# On les installe toutes d'un coup avec : pip install -r requirements.txt
+# Les versions exactes installées seront figées ensuite dans requirements.lock.
+
+# --- Manipulation de données ---
+pandas>=2.2          # tableaux de données (DataFrame) : le cœur de tout le projet
+numpy>=2.0           # calcul numérique rapide (matrices, tirages aléatoires du Monte Carlo)
+pyarrow>=17.0        # format de fichier "parquet" : sauvegarde rapide et compacte des tableaux
+duckdb>=1.1          # mini base de données SQL, pour lire la base Transfermarkt efficacement
+
+# --- Collecte des données ---
+soccerdata>=1.8      # accès unifié à Understat (xG) et ClubElo (force des clubs)
+requests>=2.32       # téléchargement de pages / fichiers sur internet (FotMob, Wikipédia)
+
+# --- Statistiques et modèles ---
+scipy>=1.14          # lois de probabilité, optimisation
+statsmodels>=0.14    # modèles statistiques (facteur club : effets joueur / équipe / adversaire)
+scikit-learn>=1.5    # outils de validation et de calibration
+
+# --- Graphiques et rapport ---
+plotly>=5.24         # graphiques interactifs (éventails, aires empilées, radar...)
+matplotlib>=3.9      # graphiques simples pour l'exploration
+
+# --- Confort ---
+tqdm>=4.66           # barres de progression pendant les longs téléchargements
