@@ -211,11 +211,11 @@ def chart_paths(sim, x, k=25, seed=1):
 # -----------------------------------------------------------------------------
 # Sensibilité (tornade)
 # -----------------------------------------------------------------------------
-def sensitivity(player_id, ctx, n=2000):
+def sensitivity(player_id, ctx, n=2000, live=None):
     # On relance la simulation en changeant UN facteur à la fois, et on regarde
     # la valeur médiane dans 6 ans dans le scénario bas et haut.
     def median_final(**kw):
-        return float(np.median(mc.simulate(player_id, ctx, n=n, **kw)["value_real"][:, -1]) / 1e6)
+        return float(np.median(mc.simulate(player_id, ctx, n=n, live=live, **kw)["value_real"][:, -1]) / 1e6)
     base = median_final()
     rows = [
         ("Résilience (0,8 / 1,2)", median_final(resilience_override=0.8), median_final(resilience_override=1.2)),
@@ -245,16 +245,36 @@ h1 { font-size:28px; margin:0 0 4px; } h2 { font-size:19px; margin:36px 0 12px; 
 .kpi b { display:block; font-size:22px; margin-top:4px; } .kpi span { color:var(--muted); font-size:13px; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:8px; margin-bottom:14px; }
 .note { color:var(--muted); font-size:13px; line-height:1.5; }
+table.live { width:100%; border-collapse:collapse; font-size:14px; }
+table.live th, table.live td { text-align:right; padding:6px 10px; border-bottom:1px solid var(--line); }
+table.live th:first-child, table.live td:first-child { text-align:left; }
+.card { overflow-x:auto; }
 """
 
 
-def build_report(player_id, ctx=None, path=None):
+def live_block(obs):
+    # Encadré "forme de la saison en cours" (données FotMob récupérées à la demande)
+    if obs is None or len(obs) == 0:
+        return '<p class="note">Aucune donnée 2026/27 trouvée sur FotMob pour ce joueur : départ en juillet 2026.</p>'
+    names = {1: "T1 (août-oct.)", 2: "T2 (nov.-janv.)", 3: "T3 (févr.-avr.)", 4: "T4 (mai-juil.)"}
+    rows = "".join(
+        f"<tr><td>{names[r.quarter]}</td><td>{r.matches}</td><td>{r.minutes:.0f}</td><td>{r.share * 100:.0f} %</td>"
+        f"<td>{r.goals:.0f}</td><td>{r.xg:.1f}</td><td>{r.missed_injury}</td>"
+        f"<td>{'' if np.isnan(r.perf) else f'{r.perf:+.2f}'}</td></tr>" for r in obs.itertuples())
+    return ('<h2>Forme 2026/27 (FotMob, récupérée à la demande)</h2><div class="card"><table class="live">'
+            "<tr><th>Trimestre</th><th>Matchs</th><th>Minutes</th><th>Temps de jeu</th><th>Buts</th>"
+            "<th>xG</th><th>Matchs manqués (blessure)</th><th>Indice perf. (saison)</th></tr>"
+            f"{rows}</table><p class='note'>Ces trimestres sont observés, pas simulés : ils mettent à jour "
+            "l'état de départ du joueur dans la chaîne de Markov avant la simulation.</p></div>")
+
+
+def build_report(player_id, ctx=None, path=None, live=None):
     ctx = ctx or mc.Context()
-    sim = mc.simulate(player_id, ctx)
+    sim = mc.simulate(player_id, ctx, live=live)
     meta = sim["meta"]
     x = quarter_labels(meta["t0"], meta["steps"])
     seasons = season_labels(meta["t0"], meta["steps"] // 4)
-    sens, base = sensitivity(player_id, ctx)
+    sens, base = sensitivity(player_id, ctx, live=live)
     final_real = sim["value_real"][:, -1] / 1e6
     final_nom = sim["value_nominal"][:, -1] / 1e6
     p_star = ((sim["state"] >= 4).mean(axis=1) >= 0.5).mean() * 100
@@ -299,6 +319,7 @@ def build_report(player_id, ctx=None, path=None):
     <p class="sub">Projection sur {config.HORIZON_YEARS} ans ({meta['steps']} trimestres) ·
     {meta['n']:,} carrières simulées · âge au départ {meta['age0']:.1f} ans · départ : {x[0]}</p>
     <div class="kpis">{kpi_html}</div>
+    {live_block(meta.get("live_obs"))}
     {''.join(parts)}
     {notes}
     </main></body></html>"""

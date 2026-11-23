@@ -73,7 +73,9 @@ def adjust_for_resilience(trans, r):
 
 
 def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, origin_t=None,
-             seed=config.RANDOM_SEED, resid_scale=RESID_SCALE, resilience_override=None):
+             seed=config.RANDOM_SEED, resid_scale=RESID_SCALE, resilience_override=None, live=None):
+    # live : mise à jour issue des matchs récents (collectors/live.py) :
+    #   {"probs": probabilités d'état mises à jour, "obs": observations par trimestre}
     ctx = ctx or Context()
     rng = np.random.default_rng(seed)
     p = ctx.panel[ctx.panel.player_id == player_id].sort_values("t")
@@ -88,18 +90,29 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     # --- Point de départ ---------------------------------------------------
     f0 = last[[f"f_{s}" for s in config.STATES]].to_numpy(dtype=float)
     f0 = f0 / f0.sum() if np.isfinite(f0).all() and f0.sum() > 0 else np.eye(K)[hmm.TITULAIRE]
-    state = rng.choice(K, size=n, p=f0)
     r = resilience_override or ctx.resilience.get(player_id, 1.0)
     family = FAMILY_INDEX[last.pos_group]
     tier = int(last.tier) if pd.notna(last.tier) else 0     # niveau de talent au départ (fixe)
     age0, t0 = float(last.age), int(last.t)
+    live_obs = None
+    if live is not None and len(live["obs"]):
+        # Départ décalé : les trimestres 2026/27 déjà joués sont OBSERVÉS, pas simulés
+        live_obs = live["obs"]
+        f0 = np.asarray(live["probs"], dtype=float)
+        t0 += len(live_obs)
+        age0 += len(live_obs) / 4
+    state = rng.choice(K, size=n, p=f0)
     elo = np.full(n, float(last.own_elo) if pd.notna(last.own_elo) else 1500.0)
     elo_home = elo.copy()                                  # niveau habituel du club
     years = float(last.contract_years) if pd.notna(last.contract_years) else 2.0
     contract = np.full(n, years)
     recent_perf = list(p.perf_adj.fillna(0).tail(3)) or [0.0]
+    recent_share = list(p.minutes_share.fillna(0).tail(3)) or [0.0]
+    if live_obs is not None:
+        recent_perf = (recent_perf + list(live_obs.perf.fillna(0)))[-3:]
+        recent_share = (recent_share + list(live_obs.share))[-3:]
     perf_hist = np.tile(np.array(recent_perf), (n, 1))
-    share_hist = np.tile(np.array(list(p.minutes_share.fillna(0).tail(3)) or [0.0]), (n, 1))
+    share_hist = np.tile(np.array(recent_share), (n, 1))
     national_last = np.full(n, -99)                        # dernier trimestre joué en sélection
     if last.national:
         national_last[:] = t0
@@ -209,7 +222,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     out["revenue"] = _revenues(out, t0, last.league)
     out["meta"] = {"player_id": player_id, "name": last.get("name"), "t0": t0, "age0": age0,
                    "value0": float(last.market_value), "club_elo0": float(elo_home.mean()),
-                   "resilience": r, "start_probs": f0, "steps": steps, "n": n}
+                   "resilience": r, "start_probs": f0, "steps": steps, "n": n, "live_obs": live_obs,
+                   "pos_group": last.pos_group, "tier": tier}
     return out
 
 

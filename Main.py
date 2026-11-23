@@ -54,11 +54,33 @@ def main():
     from reporting import report
     from simulation import monte_carlo as mc
 
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    offline = "--offline" in sys.argv          # --offline : pas de récupération FotMob à la demande
     print("Chargement des modèles…")
     ctx = mc.Context()
-    player_id = find_player(ctx, " ".join(sys.argv[1:]))
+    player_id = find_player(ctx, " ".join(args))
+
+    # Données récentes (saison en cours) récupérées à la demande sur FotMob
+    live = None
+    if not offline:
+        from collectors import live as live_data
+        from models import hmm
+        last = ctx.panel[ctx.panel.player_id == player_id].sort_values("t").iloc[-1]
+        probs = last[[f"f_{s}" for s in config.STATES]].to_numpy(dtype=float)
+        print("Récupération des matchs 2026/27 sur FotMob…")
+        updated, obs, added = live_data.update_player(
+            # âge au début de la saison 2026/27 (FotMob donne l'âge arrondi à l'année inférieure)
+            last["name"], last.age + 0.25, last.pos_group, probs / probs.sum(), ctx.hmm["params"],
+            int(last.cls) if last.cls == last.cls else 0)
+        if added:
+            print(f"  {added} trimestre(s) 2026/27 intégré(s) : {int(obs.matches.sum())} matchs, "
+                  f"{obs.minutes.sum():.0f} minutes")
+            live = {"probs": updated, "obs": obs}
+        else:
+            print("  aucune donnée récente trouvée (départ en juillet 2026)")
+
     print(f"Simulation de {config.N_SIMULATIONS:,} carrières…")
-    path, sim = report.build_report(player_id, ctx)
+    path, sim = report.build_report(player_id, ctx, live=live)
     print(f"✓ Rapport : {path}")
 
 

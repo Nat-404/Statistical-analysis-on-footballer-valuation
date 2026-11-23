@@ -150,6 +150,9 @@ def m_step(df, gamma, xi_by_class, first_by_class):
     inj = df.injured_obs.to_numpy()
     okj = ~np.isnan(inj)
     params["injury"] = ((gamma[okj] * inj[okj, None]).sum(0) + 1) / (gamma[okj].sum(0) + 2)
+    # Un joueur "Marginal" est écarté, pas blessé : on plafonne sa probabilité de
+    # blessure observée, sinon "Marginal" et "Blessé" deviennent indiscernables.
+    params["injury"][MARGINAL] = min(params["injury"][MARGINAL], 0.10)
 
     # Transitions par classe, lissées vers la moyenne de la même tranche d'âge
     # et du même niveau de talent (tous postes confondus)
