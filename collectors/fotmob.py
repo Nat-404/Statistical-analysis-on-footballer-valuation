@@ -228,6 +228,30 @@ def collect_league_season(league_key, league_id, season):
     return len(matches)
 
 
+def load_season(league_key, season):
+    # Relit une saison : depuis les fichiers parquet si la saison est complète,
+    # sinon directement depuis les matchs déjà en cache (saison en cours de
+    # téléchargement). Renvoie 4 tableaux : matchs, joueurs, tirs, compositions.
+    folder = OUT / league_key
+    if (folder / f"{season}_players.parquet").exists():
+        return tuple(pd.read_parquet(folder / f"{season}_{name}.parquet")
+                     for name in ("matches", "players", "shots", "lineups"))
+    league = {**config.LEAGUES, **config.SECOND_DIVISIONS}[league_key]
+    matches = list_matches(league["fotmob"], season)
+    players, shots, lineups, kept = [], [], [], []
+    for match_id in matches["match_id"]:
+        cache_file = CACHE / "matches" / str(int(match_id) // 1000) / f"{match_id}.json.gz"
+        if not cache_file.exists():          # pas encore téléchargé : on le saute
+            continue
+        match = get_match(match_id)
+        players += parse_player_stats(match)
+        shots += parse_shots(match)
+        lineups += parse_lineups(match)
+        kept.append(match_id)
+    matches = matches[matches.match_id.isin(kept)].assign(league=league_key, season=season)
+    return matches, pd.DataFrame(players), pd.DataFrame(shots), pd.DataFrame(lineups)
+
+
 def all_targets():
     # Liste de tous les (championnat, saison) à collecter.
     # On parcourt les saisons de la plus récente à la plus ancienne :

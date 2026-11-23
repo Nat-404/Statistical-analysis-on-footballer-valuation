@@ -23,3 +23,4 @@ matplotlib>=3.9      # graphiques simples pour l'exploration
 
 # --- Confort ---
 tqdm>=4.66           # barres de progression pendant les longs téléchargements
+rapidfuzz>=3.9       # comparaison rapide de noms (rapprochement des joueurs entre sources)
