@@ -43,7 +43,19 @@ K = len(config.STATES)                           # 6 états
 BLESSE, MARGINAL, ROTATION, TITULAIRE, FORT, ELITE = range(K)
 AGE_BINS = [0, 20, 23, 26, 29, 32, 35, 99]       # tranches : <20, 20-22, 23-25, 26-28, 29-31, 32-34, 35+
 FAMILIES = {"GK": 0, "CB": 1, "FB": 1, "MID": 2, "AMW": 3, "FW": 3}   # gardien, défense, milieu, attaque
-N_CLASSES = (len(AGE_BINS) - 1) * 4
+# Niveau de TALENT : sans lui, la chaîne n'a pas de mémoire (une star blessée
+# redeviendrait un remplaçant comme un autre). Mesuré par le rang de sa valeur
+# marchande parmi les joueurs de son âge à la même date (information connue
+# à ce moment-là, sans regarder le futur) : 0 = reste, 1 = top 10-40 %, 2 = top 10 %.
+TIER_CUTS = [0.60, 0.90]
+N_TIERS = len(TIER_CUTS) + 1
+N_AGES = len(AGE_BINS) - 1
+N_CLASSES = N_AGES * 4 * N_TIERS
+
+
+def class_index(age_bin, family, tier):
+    # Numéro de la matrice de transition : tranche d'âge x famille de poste x talent
+    return (age_bin * 4 + family) * N_TIERS + tier
 SHARE_BINS = [-0.01, 0.05, 0.30, 0.60, 0.85, 1.01]   # 5 tranches de part de temps de jeu
 PRIOR_STRENGTH = 30          # poids du lissage des matrices vers la matrice moyenne par âge
 FULL_WEIGHT_MINUTES = 1080   # 12 matchs complets : l'indice de perf compte à 100 %
@@ -83,9 +95,11 @@ def load_panel(cutoff_t=None):
     proxy[(df.minutes_share < 0.05) & (prev_share >= 0.5) & ~df.moved] = 1.0
     proxy[df.minutes_share >= 0.30] = 0.0
     df["injured_obs"] = df["injured_obs"].fillna(proxy)
-    # Classe de transition : tranche d'âge x famille de poste
-    age_bin = np.digitize(df.age, AGE_BINS[1:-1])
-    df["cls"] = age_bin * 4 + df.pos_group.map(FAMILIES).astype(int)
+    # Classe de transition : tranche d'âge x famille de poste x niveau de talent
+    df["age_bin"] = np.digitize(df.age, AGE_BINS[1:-1])
+    pct = df.groupby(["season", "age_bin"]).market_value.rank(pct=True).fillna(0)
+    df["tier"] = np.digitize(pct, TIER_CUTS)
+    df["cls"] = class_index(df.age_bin, df.pos_group.map(FAMILIES).astype(int), df.tier)
     return df
 
 
@@ -138,10 +152,12 @@ def m_step(df, gamma, xi_by_class, first_by_class):
     params["injury"] = ((gamma[okj] * inj[okj, None]).sum(0) + 1) / (gamma[okj].sum(0) + 2)
 
     # Transitions par classe, lissées vers la moyenne de la même tranche d'âge
+    # et du même niveau de talent (tous postes confondus)
     counts = xi_by_class + 1e-3
-    pooled_by_age = counts.reshape(-1, 4, K, K).sum(axis=1)                 # somme sur les postes
-    pooled_by_age = pooled_by_age / pooled_by_age.sum(axis=2, keepdims=True)
-    prior = np.repeat(pooled_by_age, 4, axis=0) * PRIOR_STRENGTH
+    grid = counts.reshape(N_AGES, 4, N_TIERS, K, K)
+    pooled = grid.sum(axis=1, keepdims=True)                                # somme sur les postes
+    pooled = pooled / pooled.sum(axis=-1, keepdims=True)
+    prior = np.broadcast_to(pooled, grid.shape).reshape(N_CLASSES, K, K) * PRIOR_STRENGTH
     trans = counts + prior
     params["trans"] = trans / trans.sum(axis=2, keepdims=True)
 
@@ -314,7 +330,7 @@ def fit(cutoff_t=None, max_iter=80, tol=2e-5, verbose=True):
         xi_list.append((idx, xi))
     res = resilience(df, gamma, xi_list, params)
 
-    states = df[["player_id", "t", "season", "quarter", "age", "pos_group", "cls"]].copy()
+    states = df[["player_id", "t", "season", "quarter", "age", "pos_group", "tier", "cls"]].copy()
     for k, name in enumerate(config.STATES):
         states[f"p_{name}"] = gamma[:, k]           # probabilité lissée (avec le futur)
         states[f"f_{name}"] = filtered[:, k]        # probabilité filtrée (passé seulement)

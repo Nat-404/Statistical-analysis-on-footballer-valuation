@@ -47,6 +47,8 @@ FORMULA = (
     " + log_views + has_views + national + eu + left_foot + height_c"
     " + C(season)"
 )
+# Même formule, avec en plus la valeur d'il y a un an (log_lag)
+DYNAMIC_FORMULA = FORMULA.replace("log_value ~ ", "log_value ~ log_lag + ")
 
 
 def build_features(df):
@@ -117,14 +119,26 @@ def fit(cutoff_t=None):
     centering = {col: float(((df.contract_years > lo) & (df.contract_years <= hi))[recent].mean())
                  for col, (lo, hi) in CONTRACT_BINS.items()}
 
-    # Persistance du résidu d'un trimestre frais à l'autre (même joueur) : rho
-    train["resid"] = model.resid
-    train = train.sort_values(["player_id", "t"])
-    prev = train.groupby("player_id").resid.shift()
-    gap = train.t - train.groupby("player_id").t.shift()
-    ok = prev.notna() & (gap == 1)
-    rho = float(np.polyfit(prev[ok], train.resid[ok], 1)[0])
-    innovation_sd = float(np.std(train.resid[ok] - rho * prev[ok]))
+    # MODÈLE DYNAMIQUE (celui utilisé par la simulation).
+    # Le modèle "en niveau" ci-dessus explique mal le prix des stars (il lui
+    # manque leur talent, que les données ne mesurent qu'en partie). Le marché,
+    # lui, part du prix ACTUEL et l'ajuste. On fait pareil :
+    #     log(valeur dans 1 an) = a + b x log(valeur aujourd'hui) + effets des
+    #                             caractéristiques dans 1 an (état, perf, âge...)
+    # b proche de 1 = forte persistance ; (1 - b) = retour progressif vers la
+    # valeur "expliquée" par le profil du joueur.
+    df = df.sort_values(["player_id", "t"])
+    lag = df[["player_id", "t", "market_value"]].assign(t=df.t + 4).rename(columns={"market_value": "lag_value"})
+    dyn = df.merge(lag, on=["player_id", "t"], how="left")
+    dyn = dyn[dyn.fresh & dyn.family.notna() & (dyn.lag_value > 0)].copy()
+    dyn["log_lag"] = np.log(dyn.lag_value)
+    dyn["season"] = dyn.season.astype(str)
+    dynamic = smf.ols(DYNAMIC_FORMULA, dyn).fit()
+    # Écart entre la valeur réelle et le modèle dynamique : persiste-t-il d'une année sur l'autre ?
+    dyn["resid"] = dynamic.resid
+    nxt = dyn[["player_id", "t", "resid"]].assign(t=dyn.t - 4)
+    pairs = dyn.merge(nxt, on=["player_id", "t"], suffixes=("", "_next"))
+    resid_persistence = float(np.polyfit(pairs.resid, pairs.resid_next, 1)[0])
 
     # Indice d'inflation : coefficient de chaque saison (par rapport à la 1re)
     seasons = sorted(train.season.unique())
@@ -132,7 +146,8 @@ def fit(cutoff_t=None):
     # Tendance annuelle moyenne sur TOUTE la période (plus stable qu'une fenêtre courte)
     steps = np.diff([index[s] for s in sorted(index)])
     inflation = {"index": index, "drift": float(np.mean(steps)), "vol": float(np.std(steps))}
-    return {"model": model, "rho": rho, "innovation_sd": innovation_sd, "inflation": inflation,
+    return {"model": model, "dynamic": dynamic, "annual_sd": float(np.sqrt(dynamic.scale)),
+            "resid_persistence": resid_persistence, "inflation": inflation,
             "contract_centering": centering, "last_season": int(max(seasons))}
 
 
