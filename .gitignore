@@ -18,3 +18,6 @@ outputs/
 # Fichiers système macOS
 .DS_Store
 .playwright-mcp/
+
+# Fichiers temporaires du papier
+paper/_paper_html.tex

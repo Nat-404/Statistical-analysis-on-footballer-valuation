@@ -1,0 +1,397 @@
+\documentclass[11pt]{amsart}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{example}[theorem]{Example}
+\theoremstyle{remark}
+\newtheorem{remark}[theorem]{Remark}
+
+\title{Hidden Markov Models and Monte Carlo Simulation for Forecasting the Market Value of Football Players}
+\author{Nathan Diers}
+\date{November 2026}
+
+\begin{document}
+
+\begin{abstract}
+A footballer's market value is the outcome of a career that nobody can see in full: form comes and goes, injuries strike without warning, transfers move players between leagues of very different strength, and contracts run down. This paper builds a probabilistic model of that career. We first review Markov chains, hidden Markov models and the Monte Carlo method, proving the results we rely on. We then estimate a hidden Markov model in which each player occupies, every quarter of a season, one of six latent states (Injured, Marginal, Rotation, Starter, Strong, Elite), observed only through noisy signals: playing time, a context-adjusted performance index and injury absences. Transition probabilities depend on age, position and a talent tier. Combined with models of transfers, contracts, club strength and a dynamic valuation equation, the chain is simulated $10\,000$ times over six years to produce a distribution of future market values. A genuine out-of-sample test, in which every model is re-estimated with data available in July 2020 and then compared with the true values of June 2026, shows how a naive simulation badly overestimates future values and how an empirical drift calibration repairs it.
+\end{abstract}
+
+\maketitle
+\tableofcontents
+
+%======================================================================
+\section{Introduction}
+%======================================================================
+
+In June 2025 Bukayo Saka was valued at 150 million euros. One year later, at 24 years old and seemingly entering the best years of his career, he was valued at 110 million. Nothing about his talent had changed. What had changed was a series of hamstring injuries that cost him a large part of the 2024/25 season. Five months into the 2026/27 season he was again absent from every Arsenal team sheet. Anyone trying to say what Saka will be worth in 2032 must therefore answer two questions at once: what is he really capable of, and what is going to happen to him?
+
+The first question is about a quantity we cannot observe. We see minutes, goals, expected goals and absences, but these are noisy reflections of a player's true level: a forward can have a bad quarter while remaining an elite forward. The second question is about randomness. Injuries, transfers, coaching changes and contract negotiations are, from the outside, random events whose probabilities we can estimate from thousands of past careers but whose realisation we cannot predict.
+
+These two features point to two classical tools. Hidden Markov models (HMMs) describe a system that moves between unobserved states and emits noisy observations; they separate the signal (the latent level) from the noise (the quarter-to-quarter fluctuation). Monte Carlo simulation turns a model full of random events into a distribution of outcomes by sampling many possible futures. Rather than a single number, the model answers questions such as ``what is the probability that this player is worth more than 100 million euros in 2030?''
+
+The paper is organised as follows. Section~\ref{sec:markov} introduces Markov chains and proves the Chapman--Kolmogorov equations. Section~\ref{sec:hmm} defines hidden Markov models and derives the forward--backward and Baum--Welch algorithms. Section~\ref{sec:mc} presents the Monte Carlo method and its error. Section~\ref{sec:data} describes the data, including an Elo rating system for which we prove a conservation property. Section~\ref{sec:model} assembles the full model, Section~\ref{sec:results} presents the results and the out-of-sample validation, and Section~\ref{sec:flaws} discusses the flaws of the model.
+
+%======================================================================
+\section{Related Work}\label{sec:related}
+%======================================================================
+
+Three strands of literature meet in this project. The first concerns the \emph{age profile} of footballers. Using performance ratings for the top European leagues, Dendir~\cite{dendir} finds that forwards peak around 25 and defenders around 27, with a marked decline near 29; later work reports that goalkeepers and centre-backs keep their level for longer. These findings motivate our age-dependent transition matrices, estimated separately by position group rather than imposed.
+
+The second strand studies \emph{market values}. M\"uller, Simons and Weinmann~\cite{muller} estimate the market values of 4\,217 players of the top five leagues with multilevel regressions on performance, popularity and player characteristics, and argue that data-driven estimates can match the accuracy of the Transfermarkt crowd while being transparent and easy to update. Coates and Parshakov~\cite{coates} examine the crowd itself and show that Transfermarkt values, while closely related to transfer fees, are systematically biased for some groups of players, in particular in the largest leagues. Our valuation equations follow the first approach; the second reminds us that what we forecast is a crowd estimate, not a price.
+
+The third strand is methodological. Hidden Markov models were introduced in the statistical literature by Baum and coauthors~\cite{baum}, and their estimation is a special case of the EM algorithm of Dempster, Laird and Rubin~\cite{dlr}; Rabiner's tutorial~\cite{rabiner} remains the standard introduction. On the measurement side, Davis and Robberechts~\cite{davis} show that finishing skill is hard to separate from noise in expected-goals data, which supports building the performance index on shot quality and volume rather than on goals.
+
+To our knowledge, combining these elements, a latent-state model of a career, event models for transfers and contracts, and a dynamic valuation equation, into a Monte Carlo forecast that is then validated out of sample over six years, is the contribution of this paper.
+
+%======================================================================
+\section{Markov Chains}\label{sec:markov}
+%======================================================================
+
+Throughout, $(\Omega,\mathcal{F},P)$ is a probability space and $S=\{1,\dots,K\}$ a finite set of \emph{states}. In our application $K=6$ and the states are, in increasing order, Injured, Marginal, Rotation, Starter, Strong and Elite.
+
+\begin{definition}
+A \emph{discrete-time stochastic process} with values in $S$ is a sequence of random variables $(Z_t)_{t\ge 0}$, $Z_t:\Omega\to S$. The index $t$ is time; for us one unit of time is one quarter of a football season.
+\end{definition}
+
+\begin{definition}\label{def:markov}
+The process $(Z_t)$ is a \emph{Markov chain} if for every $t\ge 0$ and all states $i_0,\dots,i_{t-1},i,j$,
+\begin{equation}\label{eq:markov}
+P(Z_{t+1}=j \mid Z_t=i, Z_{t-1}=i_{t-1},\dots,Z_0=i_0) = P(Z_{t+1}=j\mid Z_t=i),
+\end{equation}
+whenever the left-hand side is defined. The numbers $p_{ij}(t)=P(Z_{t+1}=j\mid Z_t=i)$ are the \emph{transition probabilities}, and the $K\times K$ matrix $A_t=(p_{ij}(t))$ is the \emph{transition matrix} at time $t$. If $A_t=A$ does not depend on $t$ the chain is \emph{time-homogeneous}.
+\end{definition}
+
+Equation \eqref{eq:markov} says that the future depends on the past only through the present. For a footballer this is an assumption, not a fact: a player who has been Elite for five years is not exactly like one who became Elite last quarter. We will weaken the assumption in Section~\ref{sec:model} by letting the transition matrix depend on the player's age and on a talent tier, which carries part of the player's history.
+
+\begin{remark}
+Every row of a transition matrix sums to one, since from state $i$ the chain must go somewhere: $\sum_{j} p_{ij}(t)=1$. A matrix with non-negative entries and unit row sums is called \emph{stochastic}.
+\end{remark}
+
+The first question one asks of a Markov chain is where it will be after several steps.
+
+\begin{theorem}[Chapman--Kolmogorov]\label{thm:ck}
+Let $(Z_t)$ be a Markov chain with transition matrices $A_t$, and let $\pi_t$ be the row vector of probabilities $\pi_t(i)=P(Z_t=i)$. Then for all $t$ and $n\ge 1$,
+\[
+\pi_{t+n} = \pi_t\, A_t A_{t+1}\cdots A_{t+n-1}.
+\]
+In particular, for a time-homogeneous chain, $\pi_{t+n}=\pi_t A^n$ and the $n$-step transition probabilities are the entries of $A^n$.
+\end{theorem}
+
+\begin{proof}
+We prove the case $n=1$; the general case follows by induction. By the law of total probability,
+\begin{align*}
+\pi_{t+1}(j) = P(Z_{t+1}=j) &= \sum_{i\in S} P(Z_{t+1}=j \mid Z_t=i)\,P(Z_t=i)\\
+&= \sum_{i\in S} \pi_t(i)\, p_{ij}(t) = (\pi_t A_t)(j).
+\end{align*}
+Assume now that $\pi_{t+n}=\pi_t A_t\cdots A_{t+n-1}$. Applying the case $n=1$ at time $t+n$ gives $\pi_{t+n+1}=\pi_{t+n}A_{t+n}=\pi_t A_t\cdots A_{t+n}$, which completes the induction.
+\end{proof}
+
+\begin{example}\label{ex:saka}
+Suppose a 24-year-old winger is a Starter today, so $\pi_0=(0,0,0,1,0,0)$. If the chain is time-homogeneous with matrix $A$, his distribution in six years is the fourth row of $A^{24}$. Section~\ref{sec:results} shows that, for the estimated matrices, this distribution is far from a point mass: even a Starter has a sizeable probability of becoming Strong, of dropping to Rotation, or of being injured at a given quarter.
+\end{example}
+
+\begin{definition}
+A probability vector $\mu$ is \emph{stationary} for a homogeneous chain if $\mu A=\mu$.
+\end{definition}
+
+Stationary distributions matter for us because of a failure mode we encountered: if all players share the same matrix, every simulated career converges towards the same stationary distribution, dominated by the most common states (Marginal and Rotation). A star then ``forgets'' that he is a star. This is why the model of Section~\ref{sec:model} is deliberately time-inhomogeneous and conditioned on talent.
+
+%======================================================================
+\section{Hidden Markov Models}\label{sec:hmm}
+%======================================================================
+
+We never observe whether a player is ``Strong'' or merely a ``Starter''. We observe numbers that depend on it.
+
+\begin{definition}\label{def:hmm}
+A \emph{hidden Markov model} is a pair of processes $(Z_t,O_t)_{t=1}^T$ such that $(Z_t)$ is a Markov chain on $S$ with initial distribution $\pi$ and transition matrices $A_t$, and, conditionally on $(Z_t)$, the observations $O_1,\dots,O_T$ are independent with $O_t$ depending only on $Z_t$:
+\[
+P(O_t\in B\mid Z_1,\dots,Z_T, O_s, s\ne t) = P(O_t\in B\mid Z_t).
+\]
+The conditional law of $O_t$ given $Z_t=k$ is the \emph{emission distribution} of state $k$; we write $e_k(o)$ for its density or mass function.
+\end{definition}
+
+In our model $O_t$ has three components: the share of available league minutes the player played (grouped into five bins), a context-adjusted performance index (a real number) and an indicator of missed matches through injury. Any component may be missing, in which case its factor is simply omitted from $e_k$.
+
+The joint probability of a path of states $z=(z_1,\dots,z_T)$ and of the observations $o$ factorises as
+\begin{equation}\label{eq:joint}
+P(Z=z, O=o) = \pi(z_1)\,e_{z_1}(o_1)\prod_{t=2}^{T} p_{z_{t-1}z_t}(t)\,e_{z_t}(o_t).
+\end{equation}
+Summing \eqref{eq:joint} over all $K^T$ paths is impossible for $T=40$ quarters, but the Markov structure allows a recursion.
+
+\begin{definition}
+The \emph{forward variables} are $\alpha_t(j)=P(O_1=o_1,\dots,O_t=o_t,\ Z_t=j)$ and the \emph{backward variables} are $\beta_t(i)=P(O_{t+1}=o_{t+1},\dots,O_T=o_T\mid Z_t=i)$, with $\beta_T\equiv 1$.
+\end{definition}
+
+\begin{proposition}[Forward--backward recursions]\label{prop:fb}
+For $t\ge 1$,
+\[
+\alpha_{t+1}(j) = e_j(o_{t+1})\sum_{i\in S}\alpha_t(i)\,p_{ij}(t+1),\qquad
+\beta_t(i) = \sum_{j\in S} p_{ij}(t+1)\,e_j(o_{t+1})\,\beta_{t+1}(j),
+\]
+with $\alpha_1(j)=\pi(j)e_j(o_1)$. Moreover the likelihood is $P(O=o)=\sum_j\alpha_T(j)$, and the \emph{smoothed} state probabilities are
+\[
+\gamma_t(i) := P(Z_t=i\mid O=o) = \frac{\alpha_t(i)\beta_t(i)}{\sum_k \alpha_t(k)\beta_t(k)}.
+\]
+\end{proposition}
+
+\begin{proof}
+For the forward recursion, condition on $Z_t$:
+\begin{align*}
+\alpha_{t+1}(j) &= \sum_i P(o_1,\dots,o_t, Z_t=i, Z_{t+1}=j, o_{t+1})\\
+&= \sum_i P(o_1,\dots,o_t,Z_t=i)\,P(Z_{t+1}=j\mid Z_t=i)\,P(o_{t+1}\mid Z_{t+1}=j),
+\end{align*}
+where the second equality uses the Markov property \eqref{eq:markov} and the conditional independence of the observations. This is $e_j(o_{t+1})\sum_i\alpha_t(i)p_{ij}(t+1)$. The backward recursion is proved in the same way by conditioning on $Z_{t+1}$. Finally, by conditional independence of the past and future observations given $Z_t$,
+$P(Z_t=i, O=o)=\alpha_t(i)\beta_t(i)$; summing over $i$ gives $P(O=o)$, and dividing gives $\gamma_t(i)$.
+\end{proof}
+
+\begin{remark}
+In practice the $\alpha_t$ become numerically tiny. Our implementation rescales $\alpha_t$ to sum to one at every step and stores the scaling constants $c_t$; then $\log P(O=o)=\sum_t\log c_t$. The rescaled $\alpha_t$ is exactly the \emph{filtered} distribution $P(Z_t=\cdot\mid o_1,\dots,o_t)$, which uses only the past. We use filtered probabilities as the starting point of every simulation, so that a forecast never looks into the future.
+\end{remark}
+
+\subsection{Estimation by the Baum--Welch algorithm}
+The parameters $\theta$ (initial distributions, transition matrices and emission parameters) are unknown. Given many independent sequences (one per player), we maximise the likelihood $L(\theta)=\prod_{\text{players}}P_\theta(O=o)$. Because the states are unobserved, direct maximisation is hard; the Baum--Welch algorithm, a special case of the EM algorithm, alternates two steps.
+
+\begin{enumerate}
+\item[(E)] With the current parameters $\theta^{(m)}$, compute $\gamma_t(i)$ and the pair probabilities $\xi_t(i,j)=P(Z_t=i,Z_{t+1}=j\mid o)=\alpha_t(i)p_{ij}(t+1)e_j(o_{t+1})\beta_{t+1}(j)/P(o)$.
+\item[(M)] Re-estimate each parameter as a weighted frequency. For instance
+\[
+p^{(m+1)}_{ij}(c) = \frac{\sum_{t:\,\text{class}(t)=c}\xi_t(i,j)}{\sum_{t:\,\text{class}(t)=c}\sum_{j'}\xi_t(i,j')},
+\]
+where the \emph{class} of a transition is the (age, position, talent) cell whose matrix it uses; the emission mean of the performance index in state $k$ is the $\gamma$-weighted mean of the observed indices, and so on.
+\end{enumerate}
+
+\begin{theorem}[Baum et al.~\cite{baum}, Dempster--Laird--Rubin~\cite{dlr}]\label{thm:em}
+Each iteration of the Baum--Welch algorithm does not decrease the likelihood: $L(\theta^{(m+1)})\ge L(\theta^{(m)})$.
+\end{theorem}
+
+\begin{proof}[Sketch of proof]
+Write $Q(\theta\mid\theta^{(m)})=E_{\theta^{(m)}}[\log P_\theta(Z,O)\mid O=o]$. By Jensen's inequality applied to the concave logarithm, $\log L(\theta)-\log L(\theta^{(m)})\ge Q(\theta\mid\theta^{(m)})-Q(\theta^{(m)}\mid\theta^{(m)})$. The M-step maximises $Q(\cdot\mid\theta^{(m)})$, and because \eqref{eq:joint} is a product of transition and emission terms, this maximisation separates into weighted frequency estimates such as the one above. Hence the right-hand side is non-negative at $\theta^{(m+1)}$.
+\end{proof}
+
+The likelihood can have several local maxima and the states have no intrinsic labels, so two practical safeguards are needed. We start the algorithm from a rule-based assignment (for example, ``Starter'' if the player played at least 60\% of minutes), and after each M-step we relabel the three top states so that their mean performance is increasing. Without these constraints the algorithm converged to states that sorted players by minutes rather than by quality.
+
+%======================================================================
+\section{Monte Carlo Simulation}\label{sec:mc}
+%======================================================================
+
+Once the model is estimated, the value of a player in six years is a complicated function $g$ of thousands of random draws $U$ (state transitions, injuries, transfers, contract renewals, market noise). Its distribution has no closed form. The Monte Carlo method replaces calculation by repetition.
+
+\begin{definition}
+Let $X=g(U)$ be a real random variable with $E[X^2]<\infty$ and let $X_1,\dots,X_N$ be independent copies obtained by simulating $U$ independently $N$ times. The \emph{Monte Carlo estimator} of $E[X]$ is $\hat\mu_N=\frac1N\sum_{n=1}^N X_n$.
+\end{definition}
+
+\begin{proposition}\label{prop:mc}
+$\hat\mu_N$ is unbiased and $\operatorname{Var}(\hat\mu_N)=\sigma^2/N$, where $\sigma^2=\operatorname{Var}(X)$. Consequently the typical error decreases like $\sigma/\sqrt N$.
+\end{proposition}
+
+\begin{proof}
+By linearity, $E[\hat\mu_N]=\frac1N\sum_n E[X_n]=E[X]$. By independence the covariances vanish, so
+$\operatorname{Var}(\hat\mu_N)=\frac{1}{N^2}\sum_n\operatorname{Var}(X_n)=\frac{N\sigma^2}{N^2}=\frac{\sigma^2}{N}$.
+\end{proof}
+
+By the strong law of large numbers $\hat\mu_N\to E[X]$ almost surely, and by the central limit theorem $\sqrt N(\hat\mu_N-E[X])/\sigma$ converges in distribution to a standard normal. The same holds for probabilities, which are expectations of indicators: the probability that a player is worth more than 100 million euros in 2030 is estimated by the fraction of the $N$ simulated careers in which he is. With $N=10\,000$ the standard error of such a probability is at most $\sqrt{0.25/10\,000}=0.5$ percentage points. Quantiles (the medians and the 10\% and 90\% bounds we report) are estimated by the corresponding empirical quantiles, which are also consistent.
+
+Every step of our simulation draws from a discrete distribution, for instance the next state given the current one. This is done by \emph{inverse transform sampling}.
+
+\begin{proposition}\label{prop:inverse}
+Let $p=(p_1,\dots,p_K)$ be a probability vector with cumulative sums $F_k=p_1+\dots+p_k$, and let $U$ be uniform on $[0,1)$. Define $X=1+\#\{k<K: U\ge F_k\}$. Then $P(X=k)=p_k$ for every $k$.
+\end{proposition}
+
+\begin{proof}
+Since $F$ is non-decreasing, $X=k$ exactly when $F_{k-1}\le U<F_k$ (with $F_0=0$). As $U$ is uniform, this event has probability $F_k-F_{k-1}=p_k$.
+\end{proof}
+
+In the code all $N=10\,000$ careers are advanced simultaneously: one uniform number per career and per quarter is compared to the cumulative row of the relevant transition matrix, exactly as in Proposition~\ref{prop:inverse}.
+
+%======================================================================
+\section{Data}\label{sec:data}
+%======================================================================
+
+We restrict attention to players who appeared in the five major European leagues (England, Spain, Italy, Germany, France) between 2014/15 and 2025/26, a total of $9\,391$ players followed over $281\,658$ player-quarters. A season is split into four quarters aligned with the football calendar: August--October, November--January (including the winter transfer window), February--April and May--July (end of season, tournaments and summer window).
+
+\subsection{Sources}
+\begin{itemize}
+\item \textbf{Transfermarkt}, through the open \emph{transfermarkt-datasets} project~\cite{tmdata}: 88\,958 matches with 1.89 million player appearances (minutes, goals, assists, cards, starting line-ups), 656\,301 historical market values, 175\,165 transfers including youth clubs, contracts and player profiles. The dataset stopped updating in July 2026.
+\item \textbf{FotMob}, whose data come from Opta: for every match of the top five leagues and their second divisions, per-player statistics (expected goals and assists, passes, duels, tackles, saves, goals prevented), shot maps and line-ups including absent players and the reason for their absence. Expected goals are available from 2018/19. FotMob replaced Understat, which went offline in November 2026, and its injury lists provide the absence data missing from Transfermarkt.
+\item \textbf{Wikipedia page views} (five languages), linked to Transfermarkt identifiers through Wikidata property P2446, as a measure of popularity.
+\end{itemize}
+
+\subsection{An Elo rating with conservation of points}
+To measure the strength of a player's team and of his opponents we need comparable ratings for clubs of many leagues. Since the public ClubElo service was unavailable, we computed our own Elo ratings~\cite{elo} from all Transfermarkt matches since 2012. Before a match between a home team with rating $R_h$ and an away team with rating $R_a$, the expected score of the home team is
+\[
+E_h = \frac{1}{1+10^{-(R_h+H-R_a)/s}},
+\]
+where $H$ is the home advantage and $s$ a scale. After the match, $R_h\leftarrow R_h+K\,G\,(S_h-E_h)$ and $R_a\leftarrow R_a-K\,G\,(S_h-E_h)$, where $S_h\in\{1,\tfrac12,0\}$ is the result and $G\ge 1$ grows with the goal difference. A grid search over $(K,H,s)$ minimising the squared prediction error selected $K=20$, $H=80$ and $s=600$.
+
+A first version of the ratings ranked the Danish league above Italy and France. The reason was a leak: promoted clubs received an arbitrary rating, which created or destroyed points every season. We fixed it with the following rule, whose effect is captured by a simple proposition.
+
+\begin{proposition}\label{prop:elo}
+Suppose that in a league, at the start of each season, every promoted club receives the mean rating of the clubs that left the league (relegated clubs), and that the numbers of promoted and relegated clubs are equal. Then the total rating of the league changes only through matches against clubs of other leagues.
+\end{proposition}
+
+\begin{proof}
+Let $T$ be the total rating of the clubs of the league. A match between two clubs of the league adds $\Delta$ to one and subtracts $\Delta$ from the other, so it leaves $T$ unchanged. At the change of season, let $D$ be the set of departing clubs, with ratings $r_d$, and suppose $|D|$ clubs are promoted. The departures remove $\sum_{d\in D}r_d$ from $T$, and the promoted clubs add $|D|\cdot\frac{1}{|D|}\sum_{d\in D}r_d$, the same amount. Hence $T$ can change only through matches in which exactly one participant belongs to the league, that is, European competitions.
+\end{proof}
+
+With this rule the five major leagues come out in the order England, Spain, Germany, Italy, France, matching their European results, and the ratings predict match outcomes well: when the model gives the home team between 50\% and 65\%, it obtains 57.5\% of the available points.
+
+%======================================================================
+\section{The Model}\label{sec:model}
+%======================================================================
+
+\subsection{A context-adjusted performance index}
+Each position is judged on its own criteria. For every player-quarter we compute per-90-minute rates (for a forward: non-penalty expected goals, expected assists, shots, touches in the box; for a centre-back: aerial duel success, tackles and interceptions, passing accuracy; for a goalkeeper: goals prevented, that is expected goals on target faced minus goals conceded) and convert each into a $z$-score relative to players of the same position group in the same season. The index is a weighted average of these $z$-scores. When FotMob data are missing we fall back on goals plus assists for attacking players.
+
+Raw statistics flatter players of dominant teams. To separate the player from his team we fit a linear mixed model
+\[
+\text{index}_{it} = u_i + \beta_1\,\text{own}_{it} + \beta_2\,\text{opp}_{it} + \lambda_{\ell(i,t)} + \varepsilon_{it},
+\]
+where $u_i$ is a random player effect, $\text{own}$ and $\text{opp}$ are the minute-weighted Elo ratings of the player's team and of his opponents (in hundreds of points), and $\lambda_\ell$ is a league effect. Players who change clubs identify $\beta_1$ separately from $u_i$. We find $\beta_1\approx+0.125$ and $\beta_2\approx-0.104$: one hundred Elo points of team strength inflate the index by an eighth of a standard deviation. The \emph{adjusted index} subtracts the estimated context.
+
+\subsection{The hidden Markov model}
+The latent state space is $S=\{$Injured, Marginal, Rotation, Starter, Strong, Elite$\}$. The emissions are:
+\begin{itemize}
+\item the playing-time bin, a categorical distribution per state; Starter, Strong and Elite share the same distribution, so that they differ only through performance;
+\item the adjusted index, normal with state-specific mean $\mu_k$ and standard deviation $\sigma_k/\sqrt{w_t}$, where $w_t\in(0,1]$ is the fraction of twelve full matches played (fewer minutes, noisier index);
+\item an injury indicator, from FotMob absences or, when FotMob is silent, from a regular starter who vanishes from team sheets without having been transferred.
+\end{itemize}
+Transitions depend on the class $c=(\text{age band},\text{position group},\text{talent tier})$: seven age bands, four position groups and three tiers defined by the percentile of the player's market value among players of his age at that date (bottom 60\%, next 30\%, top 10\%). This gives 84 transition matrices. To avoid estimating rare transitions from a handful of cases, each matrix is shrunk towards the average matrix of its age band and tier with a Dirichlet prior of weight 30. The tier is what gives the chain a memory: in the estimated model a Strong player of the top tier stays Strong from one quarter to the next with probability $0.94$, against $0.10$ for a Strong player of the bottom tier.
+
+\subsection{Resilience}
+To capture the idea that some players rebound from bad spells and others sink, we compare, for each player, the number of upward transitions observed after a decline, $O_i=\sum\xi$, with the number expected under the matrices of his class, $E_i$. A natural estimator of his relative rebound rate $r_i$ is $O_i/E_i$, but it is unstable when $E_i$ is small.
+
+\begin{proposition}
+Suppose that, given $r_i$, the number of rebounds is Poisson with mean $r_iE_i$, and that $r_i$ has a Gamma prior with shape and rate both equal to $a$ (so its prior mean is $1$). Then the posterior mean of $r_i$ is $(O_i+a)/(E_i+a)$.
+\end{proposition}
+
+\begin{proof}
+The posterior density is proportional to $r^{O_i}e^{-rE_i}\cdot r^{a-1}e^{-ar}=r^{O_i+a-1}e^{-r(E_i+a)}$, which is a Gamma density with shape $O_i+a$ and rate $E_i+a$. Its mean is the ratio of the two.
+\end{proof}
+
+We use $a=3$. In the simulation, the resilience multiplies upward transition probabilities by $r_i$ and downward ones by $1/r_i$ before each row is renormalised.
+
+\subsection{Career events}
+All probabilities below are estimated from the data with shrinkage towards group averages.
+\begin{itemize}
+\item \emph{Transfers}: the probability of changing club in a quarter depends on state, age band and quarter (it is highest in May--July and lowest in February--April). The destination is drawn among ``same league'', ``another top-five league'' and ``outside the top five'' with frequencies depending on age and tier: an average 32-year-old who moves leaves the top five in 54\% of cases, a top-tier 23-year-old in 7\%. A player outside the top five may come back.
+\item \emph{Club strength}: the Elo rating of the club follows a mean-reverting process; a transfer moves it by an amount drawn from the empirical distribution of rating gaps between departure and arrival clubs.
+\item \emph{Contracts}: the remaining length decreases each quarter; within 18 months of expiry the player may renew. No public source records contract histories, so renewal probabilities are assumptions (from 15\% per year for a Marginal player to 60\% for an Elite one). An expired contract means a free transfer.
+\item \emph{Major tournaments} (Euro 2028, World Cup 2030), whose participation probabilities by state and age are estimated from past tournaments, and \emph{red cards}, which remove matches.
+\end{itemize}
+
+\subsection{A dynamic valuation equation}
+Let $y_t$ be the logarithm of the market value. A first ``level'' regression of $y_t$ on state probabilities, recent performance, playing time, age (a cubic by position group), club Elo, league, contract length, popularity, nationality, foot, height and season effects explains 66\% of the variance, but it cannot explain why stars are worth what they are. The market itself starts from the current price and adjusts it, so we estimate the dynamic equation
+\begin{equation}\label{eq:dyn}
+y_{t+4} = a + b\,y_t + \gamma^\top X_{t+4} + \eta_{t+4},
+\end{equation}
+which explains 87\% of the variance, with $b\approx0.66$ and a residual standard deviation $\sigma_a\approx0.55$. Over the 270 cases of players worth more than 100 million euros, its one-year predictions are unbiased on average ($-1\%$). The simulation runs quarter by quarter, so we need a quarterly version of \eqref{eq:dyn}.
+
+\begin{proposition}\label{prop:partial}
+Let $y^\ast=(a+\gamma^\top X)/(1-b)$ and $c=b^{1/4}$. Consider the quarterly recursion
+\[
+y_{k+1} = y_k + (1-c)(y^\ast-y_k) + \sigma_q\,\varepsilon_{k+1},\qquad \sigma_q=\frac{\sigma_a}{\sqrt{1+c^2+c^4+c^6}},
+\]
+with $\varepsilon_k$ independent standard normal and $X$ constant over the year. Then $y_4 = a+b\,y_0+\gamma^\top X + \eta$ with $\eta\sim N(0,\sigma_a^2)$, which is exactly \eqref{eq:dyn}.
+\end{proposition}
+
+\begin{proof}
+Write $d_k=y_k-y^\ast$. The recursion reads $d_{k+1}=c\,d_k+\sigma_q\varepsilon_{k+1}$, so
+$d_4=c^4d_0+\sigma_q\sum_{j=1}^{4}c^{4-j}\varepsilon_j$. Since $c^4=b$,
+$y_4 = y^\ast + b(y_0-y^\ast) + \eta = b\,y_0+(1-b)y^\ast+\eta = a+b\,y_0+\gamma^\top X+\eta$.
+The noise $\eta=\sigma_q\sum_j c^{4-j}\varepsilon_j$ is normal with variance $\sigma_q^2(1+c^2+c^4+c^6)=\sigma_a^2$.
+\end{proof}
+
+An earlier version simulated \eqref{eq:dyn} directly, each quarter depending on the same quarter one year before. Because the four quarterly chains started from four different historical values, the simulated paths had a saw-tooth pattern; Proposition~\ref{prop:partial} removes it. ``Real'' values hold the market level of the forecast date fixed; ``nominal'' values add a random walk for market inflation whose drift ($+5.9\%$ per year) and volatility are estimated from the season effects.
+
+\subsection{The simulation}
+For a given player, the algorithm is as follows.
+\begin{enumerate}
+\item Start from the filtered state distribution at the last observed quarter, updated with the matches of the current season downloaded from FotMob on demand (one forward step of Proposition~\ref{prop:fb} per observed quarter).
+\item For each of the 24 quarters and each of the $N=10\,000$ careers: draw the next state (Proposition~\ref{prop:inverse}) from the matrix of the career's current class, adjusted for resilience; draw playing time and performance from the emissions; draw red cards, a possible transfer and its destination, contract renewal, club strength and tournament participation; update the log value with Proposition~\ref{prop:partial}; recompute the talent tier once a year from the simulated value.
+\item Aggregate the careers into medians, bands and probabilities.
+\end{enumerate}
+
+\subsection{Drift calibration}
+Section~\ref{sec:results} shows that, as described so far, the simulation is far too optimistic. The valuation equation is unbiased when fed the \emph{true} future characteristics of a player, so the optimism comes from the simulated characteristics. We therefore estimate an empirical correction. For about $1\,300$ real cases from the training period we simulate one year ahead and compare the simulated median change of $\log$ value with the realised change net of market inflation; the median gap, by age band and tier and shrunk towards the age-band mean, is added to every simulated quarter (divided by four). In the out-of-sample test this correction is itself estimated with pre-2020 data only.
+
+%======================================================================
+\section{Results}\label{sec:results}
+%======================================================================
+\input{results.tex}
+
+%======================================================================
+\section{Flaws of the Model}\label{sec:flaws}
+%======================================================================
+
+The model is a simplification and several of its weaknesses are worth stating plainly.
+
+\emph{The drift correction is large.} Before calibration the simulation overstated one-year value changes by roughly 30\% in log terms. The calibration fixes most of this empirically, and the out-of-sample test shows that the corrected forecasts are much better centred (mean PIT 0.45 against 0.24), but a correction of that size, and the remaining upward bias, mean that some mechanism of decline is still missing from the simulated characteristics. Likely candidates are the selection of players who keep receiving fresh valuations and the coarse modelling of what happens outside the top five leagues.
+
+\emph{The performance index is still coarse.} Expected goals are available from 2018/19 only, and at the time of writing the FotMob collection was incomplete, so many quarters rely on goals plus assists. This is why the Strong and Elite states are hard to separate and why defenders and goalkeepers are judged mostly through playing time and club strength.
+
+\emph{The Markov assumption.} Even with age and talent tiers, the next state depends on the past only through the current state and class. Long injury histories, which raise the risk of recurrence, are captured only partially.
+
+\emph{Contracts and revenues are assumptions.} Contract histories are not publicly available, so renewal probabilities are assumed, and the backtest cannot use contract length at all. The revenue figures attached to the forecasts (prize money, shirt royalties, sponsorship) are scenarios built from public figures~\cite{uefa,deloitte} and explicit assumptions, not predictions.
+
+\emph{Survivorship.} The validation can only score players who still have a market value in 2026; players who retired are excluded, which probably makes the test easier than reality.
+
+\emph{Market values are not prices.} Transfermarkt values are crowd estimates that have been shown to track transfer fees well but to understate them in the largest leagues~\cite{coates}. The model forecasts Transfermarkt values, not transfer fees.
+
+Finally, the Markov chain treats each quarter as one draw. A player's form within a season is more continuous than that, and quarters at the end of a season are shorter in matches than others. These simplifications are the price of a model that remains transparent, every one of its probabilities can be read off a table.
+
+%======================================================================
+\section{Conclusion}\label{sec:conclusion}
+%======================================================================
+
+We have built a model that treats a footballer's career as a hidden Markov chain and his market value as the outcome of that career, simulated $10\,000$ times. The mathematical ingredients are classical: the Chapman--Kolmogorov equations describe how a chain evolves, the forward--backward and Baum--Welch algorithms estimate a chain we cannot see, and the Monte Carlo method turns the model into probabilities whose error shrinks like $1/\sqrt N$. The football-specific ingredients, a context-adjusted performance index, talent-dependent transitions, transfers that change leagues, and a dynamic valuation equation, are what make the chain realistic.
+
+The most instructive result is negative. A simulation that looks reasonable on a handful of famous players turned out, when confronted with six real years, to overestimate future values by a factor of two and a half. Each correction (league changes, a talent tier updated every year, a market level fixed at the forecast date and an empirical drift calibration) was found by comparing forecasts with reality, not by intuition. After these corrections the 80\% forecast intervals contain the true value about 83\% of the time. A remaining upward bias, concentrated among the most expensive players, shows where the model can still improve: richer performance data, a better treatment of careers outside the top five leagues, and a model of the decline of stars that does not rely on an external correction.
+
+%======================================================================
+\section{Appendix}
+%======================================================================
+The core of the simulation, one quarter for all $N$ careers at once (Python, abridged from \texttt{simulation/monte\_carlo.py}):
+
+\begin{verbatim}
+for h in range(steps):
+    age = age0 + (h + 1) / 4
+    age_bin = int(np.digitize(age, AGE_BINS[1:-1]))
+    if quarter == 1 and h > 0:                      # yearly talent update
+        tier = np.digitize(np.exp(log_value), tier_cuts[age_bin])
+    cls = class_index(age_bin, family, tier)        # one class per career
+    A = adjust_for_resilience(trans[cls], r)        # (N, K, K)
+    state = sample_rows(A[np.arange(N), state], rng)  # inverse transform
+    share = sample_share(state); perf = rng.normal(mu[state], sd[state])
+    moved = rng.random(N) < p_move[state, age_bin, quarter]
+    ...                                             # contract, club, league
+    effects = predict(state, perf, share, elo, contract, age, league)
+    equilibrium = effects / (1 - b)                 # partial adjustment
+    log_value += (1 - c) * (equilibrium - log_value) \
+                 + scale * sigma_q * rng.normal(0, 1, N) + drift[age_bin, tier] / 4
+\end{verbatim}
+
+The complete code, including data collection, estimation and the out-of-sample test, is available from the author.
+
+\begin{thebibliography}{99}
+\bibitem{baum} L.~E. Baum, T.~Petrie, G.~Soules and N.~Weiss. A maximization technique occurring in the statistical analysis of probabilistic functions of Markov chains. \emph{Annals of Mathematical Statistics} 41(1), 1970, 164--171.
+\bibitem{dlr} A.~P. Dempster, N.~M. Laird and D.~B. Rubin. Maximum likelihood from incomplete data via the EM algorithm. \emph{Journal of the Royal Statistical Society, Series B} 39(1), 1977, 1--38.
+\bibitem{rabiner} L.~R. Rabiner. A tutorial on hidden Markov models and selected applications in speech recognition. \emph{Proceedings of the IEEE} 77(2), 1989, 257--286.
+\bibitem{norris} J.~R. Norris. \emph{Markov Chains}. Cambridge University Press, 1997.
+\bibitem{elo} A.~E. Elo. \emph{The Rating of Chessplayers, Past and Present}. Arco, 1978.
+\bibitem{dendir} S.~Dendir. When do soccer players peak? A note. \emph{Journal of Sports Analytics} 2(2), 2016.
+\bibitem{muller} O.~M\"uller, A.~Simons and M.~Weinmann. Beyond crowd judgments: data-driven estimation of market value in association football. \emph{European Journal of Operational Research} 263(2), 2017, 611--624.
+\bibitem{coates} D.~Coates and P.~Parshakov. The wisdom of crowds and transfer market values. \emph{European Journal of Operational Research} 301(2), 2022, 523--534.
+\bibitem{davis} J.~Davis and P.~Robberechts. Biases in expected goals models confound finishing ability. arXiv:2401.09940, 2024.
+\bibitem{tmdata} D.~Cariboo. transfermarkt-datasets. \url{https://github.com/dcaribou/transfermarkt-datasets}.
+\bibitem{uefa} UEFA. Distribution to clubs from the 2024--27 UEFA club competitions. \url{https://www.uefa.com}.
+\bibitem{deloitte} Deloitte. Football Money League 2026. \url{https://www.deloitte.com}.
+\end{thebibliography}
+
+\end{document}
