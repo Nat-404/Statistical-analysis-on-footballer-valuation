@@ -28,6 +28,16 @@ LEAGUES = {
     "GER": {"name": "Bundesliga",     "transfermarkt": "L1",  "understat": "GER-Bundesliga",     "fotmob": 54, "clubelo": "GER"},
     "FRA": {"name": "Ligue 1",        "transfermarkt": "FR1", "understat": "FRA-Ligue 1",        "fotmob": 53, "clubelo": "FRA"},
 }
+# Les 2es divisions : absentes de Transfermarkt (matchs) et d'Understat,
+# elles viendront de FotMob. Elles servent à suivre les joueurs relégués,
+# prêtés ou en train d'éclore avant d'arriver en 1re division.
+SECOND_DIVISIONS = {
+    "ENG2": {"name": "Championship",    "parent": "ENG", "fotmob": 48},
+    "ESP2": {"name": "Segunda División", "parent": "ESP", "fotmob": 140},
+    "ITA2": {"name": "Serie B",         "parent": "ITA", "fotmob": 86},
+    "GER2": {"name": "2. Bundesliga",   "parent": "GER", "fotmob": 146},
+    "FRA2": {"name": "Ligue 2",         "parent": "FRA", "fotmob": 110},
+}
 # Note : les identifiants FotMob seront vérifiés à l'étape 3.
 
 # -----------------------------------------------------------------------------
@@ -86,7 +96,10 @@ STATES = [
 # 7. Validation sur le passé (backtest)
 # On se place à BACKTEST_ORIGIN, on prédit 6 ans plus tard, et on compare au réel.
 # -----------------------------------------------------------------------------
-BACKTEST_ORIGIN = 2019  # on "oublie" tout ce qui s'est passé après la saison 2019/20
+# Les xG FotMob commencent en 2018/19 : en partant de l'été 2020, on dispose de
+# 2 saisons de xG avant l'origine, et la cible (été 2026) correspond exactement
+# aux dernières valeurs Transfermarkt disponibles (juin 2026).
+BACKTEST_ORIGIN = 2020  # on "oublie" tout ce qui s'est passé après la saison 2019/20
 
 # -----------------------------------------------------------------------------
 # 8. Politesse envers les sites web (scraping)
