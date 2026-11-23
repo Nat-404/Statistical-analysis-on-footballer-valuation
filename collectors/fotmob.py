@@ -34,8 +34,11 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}                 # on se présente comme 
 CACHE = config.CACHE_DIR / "fotmob"                     # dossier du cache FotMob
 OUT = config.PROCESSED_DIR / "fotmob"                   # dossier des tableaux nettoyés
 
-FIRST_SEASON_D1 = 2015   # stats de base disponibles depuis 2015/16
-FIRST_SEASON_D2 = 2018   # 2es divisions : depuis 2018/19 (début des xG), pour limiter le volume
+# Téléchargement massif limité aux saisons AVEC xG (le reste vient de Transfermarkt) :
+# ~22 000 matchs au lieu de ~39 000. Les matchs récents du joueur analysé sont,
+# eux, récupérés à la demande au moment de l'analyse.
+FIRST_SEASON_D1 = 2018   # xG disponibles depuis 2018/19
+FIRST_SEASON_D2 = 2021   # 2es divisions : 2021/22 et après, pour limiter le volume
 
 # Une session réutilise la même connexion pour toutes les requêtes (plus rapide)
 _session = requests.Session()
