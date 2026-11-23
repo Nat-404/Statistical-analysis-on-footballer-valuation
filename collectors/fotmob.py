@@ -215,7 +215,13 @@ def collect_league_season(league_key, league_id, season):
     matches = list_matches(league_id, season)
     players, shots, lineups = [], [], []
     for match_id in tqdm(matches["match_id"], desc=f"{league_key} {season_label(season)}", leave=False):
-        match = get_match(match_id)
+        try:
+            match = get_match(match_id)
+        except RuntimeError as error:
+            # Panne passagère : on note le match et on continue. Comme il n'est pas
+            # en cache, il sera retenté automatiquement au prochain lancement.
+            tqdm.write(f"⚠ match {match_id} sauté ({error})")
+            continue
         if match is None:
             continue
         players += parse_player_stats(match)
