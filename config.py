@@ -38,6 +38,13 @@ LEAGUES = {
 FIRST_SEASON = 2014    # première saison utilisée pour apprendre les modèles
 CURRENT_SEASON = 2026  # saison en cours (2026/27) : point de départ des prévisions
 
+# La base Transfermarkt est figée : dernières valeurs marchandes au 12/06/2026,
+# derniers matchs au 06/07/2026. Les prévisions partent donc du début de la
+# saison 2026/27 (1er juillet 2026). Les performances 2026/27 déjà jouées
+# viendront d'Understat et FotMob, qui sont à jour.
+TM_SNAPSHOT_DATE = "2026-07-06"
+FORECAST_ORIGIN = "2026-07-01"
+
 # -----------------------------------------------------------------------------
 # 4. Découpage trimestriel d'une saison (aligné sur le calendrier du football)
 # Chaque trimestre est la liste des mois (1 = janvier ... 12 = décembre).
