@@ -24,7 +24,7 @@
       vertical-align: middle;
     }
   </style>
-  <link rel="stylesheet" href="amsart.css?v=1795465808" />
+  <link rel="stylesheet" href="amsart.css?v=1795533581" />
   <script defer=""
   src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
   type="text/javascript"></script>
@@ -766,12 +766,11 @@ price and adjusts it, so we estimate the dynamic equation <span
 class="math display">\[\begin{equation}
 \tag{7.1}
 y_{t+4} = a + b\,y_t + \gamma^\top X_{t+4} + \eta_{t+4},
-\end{equation}\]</span> which explains 87% of the variance, with <span
-class="math inline">\(b\approx0.66\)</span> and a residual standard
-deviation <span class="math inline">\(\sigma_a\approx0.55\)</span>. Over
-the 270 cases of players worth more than 100 million euros, its one-year
-predictions are unbiased on average (<span
-class="math inline">\(-1\%\)</span>). The simulation runs quarter by
+\end{equation}\]</span> which explains 88% of the variance, with <span
+class="math inline">\(b\approx0.56\)</span> and a residual standard
+deviation <span class="math inline">\(\sigma_a\approx0.53\)</span>. Over
+the 189 cases of players worth more than 100 million euros, its one-year
+predictions are on average 5% too high. The simulation runs quarter by
 quarter, so we need a quarterly version of (7.1).</p>
 <div id="prop:partial" class="proposition">
 <p><strong>Proposition 17</strong>. <em>Let <span
@@ -855,7 +854,7 @@ data-reference="fig:transitions">1</a> shows two of the 84 estimated
 transition matrices, for attacking players aged 23 to 25. The diagonal
 dominates: careers are persistent from one quarter to the next. The
 talent tier changes the picture in the upper states. A Strong player of
-the top tier stays Strong with probability 0.94, whereas in the bottom
+the top tier stays Strong with probability 0.70, whereas in the bottom
 tier the Strong state is fragile and players fall back to Starter or
 Rotation. Injured players mostly return through Rotation, as one would
 expect of a player regaining fitness.</p>
@@ -884,8 +883,8 @@ reads as an injury. His starting distribution is therefore 100% Injured.
 Figure <a href="#fig:example" data-reference-type="ref"
 data-reference="fig:example">3</a> shows the result of <span
 class="math inline">\(10\,000\)</span> simulated careers. The median
-real value is 101 million euros after one year, 75 after three and 32
-after six, with an 80% interval of 8 to 103 million euros in 2032. The
+real value is 104 million euros after one year, 92 after three and 42
+after six, with an 80% interval of 20 to 74 million euros in 2032. The
 probability that he is worth at least 100 million euros four years from
 now is 26%. The right panel shows the mechanism: most careers leave the
 Injured state within two quarters, and the share of Strong and Elite
@@ -948,12 +947,19 @@ players).</caption>
 <td style="text-align: center;">0.28</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>+ drift calibration
+<td style="text-align: left;">+ drift calibration</td>
+<td style="text-align: center;">0.39</td>
+<td style="text-align: center;">83%</td>
+<td style="text-align: center;">+0.22</td>
+<td style="text-align: center;">0.45</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>+ FotMob xG, defence and injuries
 (final)</strong></td>
-<td style="text-align: center;"><strong>0.39</strong></td>
-<td style="text-align: center;"><strong>83%</strong></td>
-<td style="text-align: center;"><strong>+0.22</strong></td>
-<td style="text-align: center;"><strong>0.45</strong></td>
+<td style="text-align: center;"><strong>0.30</strong></td>
+<td style="text-align: center;"><strong>80%</strong></td>
+<td style="text-align: center;"><strong>-0.03</strong></td>
+<td style="text-align: center;"><strong>0.51</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;">True outcome</td>
@@ -968,9 +974,9 @@ players).</caption>
 <p>The amount of market noise added in the simulation is the one free
 parameter of the forecast intervals. Table <a href="#tab:scale"
 data-reference-type="ref" data-reference="tab:scale">2</a> shows the
-coverage for several values; we retain the value 0.75, whose 80%
-interval covers the truth in 83% of cases. The intervals are wide (the
-upper bound of the 80% interval is on average 13 times the lower bound),
+coverage for several values; we retain the value 0.25, whose 80%
+interval covers the truth in 80% of cases. The intervals are wide (the
+upper bound of the 80% interval is on average 12 times the lower bound),
 which is the honest price of a six-year horizon: Raheem Sterling went
 from 128 to 3 million euros and Sadio Mané from 120 to 6 million between
 the two dates.</p>
@@ -990,39 +996,41 @@ scale.</caption>
 <tbody>
 <tr>
 <td style="text-align: center;">0.25</td>
-<td style="text-align: center;">43%</td>
-<td style="text-align: center;">72%</td>
-<td style="text-align: center;">85%</td>
-<td style="text-align: center;">8.0</td>
+<td style="text-align: center;">52%</td>
+<td style="text-align: center;">80%</td>
+<td style="text-align: center;">89%</td>
+<td style="text-align: center;">12.3</td>
 </tr>
 <tr>
 <td style="text-align: center;">0.50</td>
-<td style="text-align: center;">47%</td>
-<td style="text-align: center;">76%</td>
-<td style="text-align: center;">87%</td>
-<td style="text-align: center;">9.7</td>
+<td style="text-align: center;">53%</td>
+<td style="text-align: center;">82%</td>
+<td style="text-align: center;">90%</td>
+<td style="text-align: center;">13.8</td>
 </tr>
 <tr>
 <td style="text-align: center;">0.75</td>
-<td style="text-align: center;">51%</td>
-<td style="text-align: center;">83%</td>
-<td style="text-align: center;">90%</td>
-<td style="text-align: center;">12.8</td>
+<td style="text-align: center;">56%</td>
+<td style="text-align: center;">85%</td>
+<td style="text-align: center;">92%</td>
+<td style="text-align: center;">16.3</td>
 </tr>
 <tr>
 <td style="text-align: center;">1.00</td>
-<td style="text-align: center;">56%</td>
+<td style="text-align: center;">58%</td>
 <td style="text-align: center;">87%</td>
 <td style="text-align: center;">94%</td>
-<td style="text-align: center;">18.0</td>
+<td style="text-align: center;">20.5</td>
 </tr>
 </tbody>
 </table>
 </div>
 <p>Coverage is similar across value bands (Table <a href="#tab:bands"
 data-reference-type="ref" data-reference="tab:bands">3</a>), but the
-remaining bias is concentrated among the most valuable players, whose
-decline the model still underestimates.</p>
+bias changes sign: the model slightly overestimates the future value of
+players already worth more than 20 million euros and underestimates that
+of cheaper players. The overall bias is small only because these two
+errors largely cancel.</p>
 <div id="tab:bands">
 <table>
 <caption>Validation by value band.</caption>
@@ -1039,27 +1047,27 @@ decline the model still underestimates.</p>
 <td style="text-align: left;"><span
 class="math inline">\(&lt;\)</span>5 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">82%</td>
-<td style="text-align: center;">+0.05</td>
+<td style="text-align: center;">75%</td>
+<td style="text-align: center;">-0.24</td>
 </tr>
 <tr>
 <td style="text-align: left;">5-20 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">83%</td>
-<td style="text-align: center;">+0.16</td>
+<td style="text-align: center;">76%</td>
+<td style="text-align: center;">-0.09</td>
 </tr>
 <tr>
 <td style="text-align: left;">20-50 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">84%</td>
-<td style="text-align: center;">+0.37</td>
+<td style="text-align: center;">85%</td>
+<td style="text-align: center;">+0.16</td>
 </tr>
 <tr>
 <td style="text-align: left;"><span
 class="math inline">\(&gt;\)</span>50 M</td>
 <td style="text-align: center;">58</td>
-<td style="text-align: center;">81%</td>
-<td style="text-align: center;">+0.38</td>
+<td style="text-align: center;">84%</td>
+<td style="text-align: center;">+0.12</td>
 </tr>
 </tbody>
 </table>
@@ -1079,17 +1087,18 @@ stating plainly.</p>
 simulation overstated one-year value changes by roughly 30% in log
 terms. The calibration fixes most of this empirically, and the
 out-of-sample test shows that the corrected forecasts are much better
-centred (mean PIT 0.45 against 0.24), but a correction of that size, and
-the remaining upward bias, mean that some mechanism of decline is still
-missing from the simulated characteristics. Likely candidates are the
-selection of players who keep receiving fresh valuations and the coarse
-modelling of what happens outside the top five leagues.</p>
+centred (mean PIT 0.51 against 0.24), but a correction of that size, and
+the upward bias that remains among players worth more than 20 million
+euros, mean that some mechanism of decline is still missing from the
+simulated characteristics. Likely candidates are the selection of
+players who keep receiving fresh valuations and the coarse modelling of
+what happens outside the top five leagues.</p>
 <p><em>The performance index is still coarse.</em> Expected goals are
-available from 2018/19 only, and at the time of writing the FotMob
-collection was incomplete, so many quarters rely on goals plus assists.
-This is why the Strong and Elite states are hard to separate and why
-defenders and goalkeepers are judged mostly through playing time and
-club strength.</p>
+available from 2018/19 only, and FotMob covers the second divisions only
+from 2021/22, so about two thirds of the player-quarters still rely on
+goals plus assists. This is why the Strong and Elite states are hard to
+separate and why defenders and goalkeepers are judged mostly through
+playing time and club strength.</p>
 <p><em>The Markov assumption.</em> Even with age and talent tiers, the
 next state depends on the past only through the current state and class.
 Long injury histories, which raise the risk of recurrence, are captured
@@ -1132,11 +1141,12 @@ three. Each correction (league changes, a talent tier updated every
 year, a market level fixed at the forecast date and an empirical drift
 calibration) was found by comparing forecasts with reality, not by
 intuition. After these corrections the 80% forecast intervals contain
-the true value about 83% of the time. A remaining upward bias,
-concentrated among the most expensive players, shows where the model can
-still improve: richer performance data, a better treatment of careers
-outside the top five leagues, and a model of the decline of stars that
-does not rely on an external correction.</p>
+the true value 80% of the time and the overall bias is close to zero. A
+bias that changes sign with the value of the player, upward for the most
+expensive and downward for the cheapest, shows where the model can still
+improve: richer performance data, a better treatment of careers outside
+the top five leagues, and a model of the decline of stars that does not
+rely on an external correction.</p>
 <h1 data-number="11" id="appendix"><span
 class="header-section-number">11</span> Appendix</h1>
 <p>The core of the simulation, one quarter for all <span

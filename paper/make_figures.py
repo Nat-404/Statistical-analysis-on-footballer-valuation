@@ -32,6 +32,7 @@ plt.rcParams.update({"font.family": "Latin Modern Roman", "mathtext.fontset": "c
 HISTORY = [
     ("Naive simulation", 0.81, 0.626, 0.995, 0.24),
     ("+ league changes, yearly talent tier", 0.70, 0.704, 0.896, 0.28),
+    ("+ drift calibration", 0.39, 0.827, 0.22, 0.45),
 ]
 
 
@@ -134,7 +135,7 @@ def write_results(trans_top, example, results):
     ratio_pred = (r["median"] / r.value_2020).median()
     rows = "\n".join(f"{n} & {rp:.2f} & {cov * 100:.0f}\\% & {bias:+.2f} & {'--' if pit is None else f'{pit:.2f}'} \\\\"
                      for n, rp, cov, bias, pit in HISTORY)
-    rows += (f"\n\\textbf{{+ drift calibration (final)}} & \\textbf{{{ratio_pred:.2f}}} & \\textbf{{{b.couverture_80 * 100:.0f}\\%}}"
+    rows += (f"\n\\textbf{{+ FotMob xG, defence and injuries (final)}} & \\textbf{{{ratio_pred:.2f}}} & \\textbf{{{b.couverture_80 * 100:.0f}\\%}}"
              f" & \\textbf{{{b.biais_log:+.2f}}} & \\textbf{{{r.pit.mean():.2f}}} \\\\")
     by_band = by_band.reindex([b for b in ["<5M", "5-20M", "20-50M", ">50M"] if b in by_band.index])
     band_rows = "\n".join(f"{band} & {int(x.joueurs)} & {x.couverture_80 * 100:.0f}\\% & {x.biais_log:+.2f} \\\\"
@@ -214,7 +215,7 @@ noise scale & 50\\% coverage & 80\\% coverage & 90\\% coverage & width of 80\\% 
 \\label{{tab:scale}}
 \\end{{table}}
 
-Coverage is similar across value bands (Table~\\ref{{tab:bands}}), but the remaining bias is concentrated among the most valuable players, whose decline the model still underestimates.
+Coverage is similar across value bands (Table~\\ref{{tab:bands}}), but the bias changes sign: the model slightly overestimates the future value of players already worth more than 20 million euros and underestimates that of cheaper players. The overall bias is small only because these two errors largely cancel.
 
 \\begin{{table}}[h]
 \\centering

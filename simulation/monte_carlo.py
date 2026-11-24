@@ -28,7 +28,7 @@ K = len(config.STATES)
 FAMILY_INDEX = hmm.FAMILIES
 QUARTER_MATCHES = 13          # matchs de championnat par trimestre, en moyenne
 CLUB_MEAN_REVERSION = 0.15    # vitesse à laquelle l'Elo d'un club revient vers son niveau habituel
-RESID_SCALE = 0.75            # niveau de bruit retenu par la validation 2020 -> 2026 (couverture 80 % ≈ 83 %)
+RESID_SCALE = 0.25            # niveau de bruit retenu par la validation 2020 -> 2026 (couverture 80 % ≈ 80 %)
 
 
 class Context:

@@ -291,7 +291,7 @@ Let $y_t$ be the logarithm of the market value. A first ``level'' regression of 
 \begin{equation}\label{eq:dyn}
 y_{t+4} = a + b\,y_t + \gamma^\top X_{t+4} + \eta_{t+4},
 \end{equation}
-which explains 87\% of the variance, with $b\approx0.66$ and a residual standard deviation $\sigma_a\approx0.55$. Over the 270 cases of players worth more than 100 million euros, its one-year predictions are unbiased on average ($-1\%$). The simulation runs quarter by quarter, so we need a quarterly version of \eqref{eq:dyn}.
+which explains 88\% of the variance, with $b\approx0.56$ and a residual standard deviation $\sigma_a\approx0.53$. Over the 189 cases of players worth more than 100 million euros, its one-year predictions are on average 5\% too high. The simulation runs quarter by quarter, so we need a quarterly version of \eqref{eq:dyn}.
 
 \begin{proposition}\label{prop:partial}
 Let $y^\ast=(a+\gamma^\top X)/(1-b)$ and $c=b^{1/4}$. Consider the quarterly recursion
@@ -332,9 +332,9 @@ Section~\ref{sec:results} shows that, as described so far, the simulation is far
 
 The model is a simplification and several of its weaknesses are worth stating plainly.
 
-\emph{The drift correction is large.} Before calibration the simulation overstated one-year value changes by roughly 30\% in log terms. The calibration fixes most of this empirically, and the out-of-sample test shows that the corrected forecasts are much better centred (mean PIT 0.45 against 0.24), but a correction of that size, and the remaining upward bias, mean that some mechanism of decline is still missing from the simulated characteristics. Likely candidates are the selection of players who keep receiving fresh valuations and the coarse modelling of what happens outside the top five leagues.
+\emph{The drift correction is large.} Before calibration the simulation overstated one-year value changes by roughly 30\% in log terms. The calibration fixes most of this empirically, and the out-of-sample test shows that the corrected forecasts are much better centred (mean PIT 0.51 against 0.24), but a correction of that size, and the upward bias that remains among players worth more than 20 million euros, mean that some mechanism of decline is still missing from the simulated characteristics. Likely candidates are the selection of players who keep receiving fresh valuations and the coarse modelling of what happens outside the top five leagues.
 
-\emph{The performance index is still coarse.} Expected goals are available from 2018/19 only, and at the time of writing the FotMob collection was incomplete, so many quarters rely on goals plus assists. This is why the Strong and Elite states are hard to separate and why defenders and goalkeepers are judged mostly through playing time and club strength.
+\emph{The performance index is still coarse.} Expected goals are available from 2018/19 only, and FotMob covers the second divisions only from 2021/22, so about two thirds of the player-quarters still rely on goals plus assists. This is why the Strong and Elite states are hard to separate and why defenders and goalkeepers are judged mostly through playing time and club strength.
 
 \emph{The Markov assumption.} Even with age and talent tiers, the next state depends on the past only through the current state and class. Long injury histories, which raise the risk of recurrence, are captured only partially.
 
@@ -352,7 +352,7 @@ Finally, the Markov chain treats each quarter as one draw. A player's form withi
 
 We have built a model that treats a footballer's career as a hidden Markov chain and his market value as the outcome of that career, simulated $10\,000$ times. The mathematical ingredients are classical: the Chapman--Kolmogorov equations describe how a chain evolves, the forward--backward and Baum--Welch algorithms estimate a chain we cannot see, and the Monte Carlo method turns the model into probabilities whose error shrinks like $1/\sqrt N$. The football-specific ingredients, a context-adjusted performance index, talent-dependent transitions, transfers that change leagues, and a dynamic valuation equation, are what make the chain realistic.
 
-The most instructive result is negative. A simulation that looks reasonable on a handful of famous players turned out, when confronted with six real years, to overestimate future values by a factor of almost three. Each correction (league changes, a talent tier updated every year, a market level fixed at the forecast date and an empirical drift calibration) was found by comparing forecasts with reality, not by intuition. After these corrections the 80\% forecast intervals contain the true value about 83\% of the time. A remaining upward bias, concentrated among the most expensive players, shows where the model can still improve: richer performance data, a better treatment of careers outside the top five leagues, and a model of the decline of stars that does not rely on an external correction.
+The most instructive result is negative. A simulation that looks reasonable on a handful of famous players turned out, when confronted with six real years, to overestimate future values by a factor of almost three. Each correction (league changes, a talent tier updated every year, a market level fixed at the forecast date and an empirical drift calibration) was found by comparing forecasts with reality, not by intuition. After these corrections the 80\% forecast intervals contain the true value 80\% of the time and the overall bias is close to zero. A bias that changes sign with the value of the player, upward for the most expensive and downward for the cheapest, shows where the model can still improve: richer performance data, a better treatment of careers outside the top five leagues, and a model of the decline of stars that does not rely on an external correction.
 
 %======================================================================
 \section{Appendix}
