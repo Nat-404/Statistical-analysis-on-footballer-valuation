@@ -3,7 +3,7 @@
 # app/make_app.sh — Construit "Football Valuation.app" (application Mac à
 # double-cliquer) qui ouvre la fenêtre de simulation (app/simulation_app.py).
 #
-#     sh app/make_app.sh            -> crée l'application dans le projet et sur le Bureau
+#     sh app/make_app.sh            -> crée l'application dans le projet et dans le dossier du projet sur le Bureau
 #
 # L'application ne contient que le lanceur : elle utilise le code, les données
 # et l'environnement Python (.venv) du projet. À refaire si le projet est déplacé.
@@ -61,9 +61,11 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/icon.icns"
 
-# 4. Copie sur le Bureau
-rm -rf "$HOME/Desktop/Football Valuation.app"
-cp -R "$APP" "$HOME/Desktop/"
-touch "$HOME/Desktop/Football Valuation.app"
+# 4. Copie dans le dossier du projet sur le Bureau (à défaut, sur le Bureau)
+DEST="$HOME/Desktop/Football valuation Projet (players)"
+[ -d "$DEST" ] || DEST="$HOME/Desktop"
+rm -rf "$DEST/Football Valuation.app"
+cp -R "$APP" "$DEST/"
+touch "$DEST/Football Valuation.app"
 echo "✓ $APP"
-echo "✓ $HOME/Desktop/Football Valuation.app"
+echo "✓ $DEST/Football Valuation.app"
