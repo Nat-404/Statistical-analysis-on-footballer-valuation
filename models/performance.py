@@ -28,6 +28,7 @@
 # =============================================================================
 
 import warnings
+from contextlib import contextmanager
 
 import numpy as np
 import pandas as pd
@@ -206,18 +207,53 @@ def adjust(df, model):
     return out
 
 
+KEEP = ["player_id", "season", "quarter", "t", "pos_group", "perf", "perf_adj", "perf_context",
+        "perf_source", "perf_minutes"]
+
+
 def build():
     df = pd.read_parquet(qt.OUT_PATH)
     df = performance_index(df)
     model = fit_context(df)
     df = adjust(df, model)
-    keep = ["player_id", "season", "quarter", "t", "pos_group", "perf", "perf_adj", "perf_context",
-            "perf_source", "perf_minutes"]
-    df[keep].to_parquet(OUT_PATH)
+    df[KEEP].to_parquet(OUT_PATH)
     import json
     CONTEXT_PATH.write_text(json.dumps({"own": float(model.params["own_c"]), "opp": float(model.params["opp_c"]),
                                         "n": int(model.nobs)}))
     return df, model
+
+
+# -----------------------------------------------------------------------------
+# Version "millésimée" pour la validation sur le passé
+# -----------------------------------------------------------------------------
+# Le facteur club (coefficients Elo + effets championnat) est estimé sur des
+# saisons entières. Pour une validation honnête, on le ré-estime avec les seules
+# données d'avant la date de départ, puis on l'applique à toute la période :
+# l'indice ajusté ne contient alors aucune information venue du futur.
+# (Le z-score de l'indice, lui, compare des joueurs d'une MÊME saison : il
+# n'utilise jamais le futur et n'a pas besoin d'être refait.)
+def vintage_path(cutoff_t):
+    return OUT_PATH.with_name(f"{OUT_PATH.stem}_until_t{cutoff_t}.parquet")
+
+
+def build_vintage(cutoff_t):
+    path = vintage_path(cutoff_t)
+    df = performance_index(pd.read_parquet(qt.OUT_PATH))
+    model = fit_context(df[df.t <= cutoff_t])
+    adjust(df, model)[KEEP].to_parquet(path)
+    return path, model
+
+
+@contextmanager
+def using(path):
+    # Pendant le bloc "with", tous les modèles lisent l'indice de performance
+    # dans "path" au lieu du fichier de production.
+    global OUT_PATH
+    previous, OUT_PATH = OUT_PATH, path
+    try:
+        yield
+    finally:
+        OUT_PATH = previous
 
 
 if __name__ == "__main__":

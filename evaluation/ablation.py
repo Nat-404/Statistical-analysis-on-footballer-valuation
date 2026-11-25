@@ -8,8 +8,9 @@
 #     python -m evaluation.ablation onoff                 -> avec le critère "on/off", 2020 -> 2026
 #     python -m evaluation.ablation onoff --origin 2023   -> même chose, validation 2023 -> 2026
 #
-# Résultat (novembre 2026) : l'on/off ne change pas l'erreur des prévisions
-# (écart moyen par joueur < 0,002 en log, non significatif) : non retenu.
+# Résultat (novembre 2026, facteur club ré-estimé à chaque date de départ) :
+# l'on/off ne change pas l'erreur des prévisions (écart moyen par joueur
+# +0,0008 en 2020, -0,0011 en 2023, non significatif) : non retenu.
 #
 # Les fichiers de la variante sont écrits dans data/processed/ablation/ : les
 # modèles de production ne sont pas touchés.

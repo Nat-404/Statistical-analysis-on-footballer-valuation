@@ -3,7 +3,8 @@
 #
 # On se replace à l'été 2020 (fin de la saison 2019/20) :
 #   1. on ré-entraîne TOUS les modèles avec les seules données d'avant cette
-#      date (sinon le modèle "connaîtrait" le futur : ce serait tricher) ;
+#      date (sinon le modèle "connaîtrait" le futur : ce serait tricher),
+#      y compris le facteur club de l'indice de performance ;
 #   2. pour plusieurs centaines de joueurs, on simule 6 ans (24 trimestres) ;
 #   3. on compare aux VRAIES valeurs de juin 2026.
 #
@@ -41,7 +42,7 @@ import numpy as np
 import pandas as pd
 
 import config
-from models import collective, events, hmm, valuation
+from models import collective, events, hmm, performance, valuation
 from simulation import monte_carlo as mc
 
 ORIGIN_T = (config.BACKTEST_ORIGIN - 1) * 4 + 3       # mai-juillet 2020 = saison 2019, T4
@@ -49,14 +50,18 @@ TARGET_T = ORIGIN_T + config.N_STEPS                  # mai-juillet 2026
 
 
 def fit_until(cutoff_t):
-    # Ré-entraîne toute la chaîne de modèles sur les données d'avant cutoff_t,
-    # y compris la calibration de la dérive (elle aussi limitée au passé).
+    # Ré-entraîne toute la chaîne de modèles sur les données d'avant cutoff_t :
+    # le facteur club de l'indice de performance d'abord (fichier "millésimé"),
+    # puis la chaîne de Markov, la valeur, les événements, le collectif et la
+    # calibration de la dérive, tous lus sur cet indice millésimé.
     from simulation import calibration
-    params, states, res = hmm.fit(cutoff_t, verbose=False)
-    fitted = {"cutoff_t": cutoff_t, "hmm_params": params, "states": states, "resilience": res,
-              "valuation": valuation.fit(cutoff_t, states), "events": events.fit(cutoff_t, states),
-              "collective": collective.fit(cutoff_t), "drift": None}
-    fitted["drift"], _ = calibration.calibrate(mc.Context(fitted), cutoff_t)
+    perf_path, _ = performance.build_vintage(cutoff_t)
+    with performance.using(perf_path):
+        params, states, res = hmm.fit(cutoff_t, verbose=False)
+        fitted = {"cutoff_t": cutoff_t, "perf_path": perf_path, "hmm_params": params, "states": states,
+                  "resilience": res, "valuation": valuation.fit(cutoff_t, states),
+                  "events": events.fit(cutoff_t, states), "collective": collective.fit(cutoff_t), "drift": None}
+        fitted["drift"], _ = calibration.calibrate(mc.Context(fitted), cutoff_t)
     return fitted
 
 
@@ -83,7 +88,8 @@ def test_players(n_players=400, seed=0, origin_t=ORIGIN_T, target_t=TARGET_T):
 def run(n_players=400, n_sims=2000, scales=(0.25, 0.5, 0.75, 1.0), fitted=None, origin_t=ORIGIN_T,
         steps=config.N_STEPS):
     fitted = fitted or fit_until(origin_t)
-    ctx = mc.Context(fitted)
+    with performance.using(fitted["perf_path"]):
+        ctx = mc.Context(fitted)
     players = test_players(n_players, origin_t=origin_t, target_t=origin_t + steps)
     market_change = realized_market_change(origin_t, origin_t + steps)
     rows = []
