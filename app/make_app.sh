@@ -22,6 +22,11 @@ cat > "$APP/Contents/MacOS/launcher" <<EOF
 #!/bin/sh
 cd "$ROOT"
 mkdir -p "$ROOT/data/cache"
+# Sur puce Apple, forcer le mode arm64 : lancé par double-clic, le Python "universel"
+# démarrerait sinon en mode Intel, incompatible avec numpy/pandas installés pour arm64.
+if [ "\$(sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
+  exec /usr/bin/arch -arm64 "$ROOT/.venv/bin/python" -m app.simulation_app >> "$ROOT/data/cache/app.log" 2>&1
+fi
 exec "$ROOT/.venv/bin/python" -m app.simulation_app >> "$ROOT/data/cache/app.log" 2>&1
 EOF
 chmod +x "$APP/Contents/MacOS/launcher"
@@ -40,6 +45,7 @@ cat > "$APP/Contents/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>LSArchitecturePriority</key><array><string>arm64</string><string>x86_64</string></array>
 </dict>
 </plist>
 EOF

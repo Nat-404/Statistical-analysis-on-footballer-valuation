@@ -97,7 +97,7 @@ def describe(row):
 class App:
     def __init__(self, root):
         self.root, self.players, self.matches = root, None, []
-        self.events, self.running, self.result = queue.Queue(), False, None
+        self.events, self.running, self.result, self.load_error = queue.Queue(), False, None, False
         self.steps, self.step, self.step_started, self.sim_fraction = STEPS_ONLINE, None, 0.0, 0.0
         root.title("Football Player Valuation")
         root.configure(bg=PAPER)
@@ -183,7 +183,10 @@ class App:
             self.players = load_players()
             self.events.put(("ready", len(self.players)))
         except Exception as error:                     # noqa: BLE001 : on affiche l'erreur
-            self.events.put(("error", f"Données introuvables ({error}). Lancer d'abord python pipeline.py."))
+            traceback.print_exc()
+            self.load_error = True
+            self.events.put(("error", f"Impossible de charger les joueurs ({type(error).__name__}). "
+                                      "Détail dans data/cache/app.log."))
 
     def _suggest(self):
         self.picked = None
@@ -235,8 +238,10 @@ class App:
             return
         row = self._resolve()
         if row is None:
-            self._set_status("Aucun joueur ne correspond à ce nom." if self.players is not None
-                             else "La liste des joueurs n'est pas encore chargée.", error=True)
+            if self.players is not None:
+                self._set_status("Aucun joueur ne correspond à ce nom.", error=True)
+            elif not self.load_error:
+                self._set_status("La liste des joueurs n'est pas encore chargée.", error=True)
             return
         self.running, self.result = True, None
         self.list_frame.pack_forget()
