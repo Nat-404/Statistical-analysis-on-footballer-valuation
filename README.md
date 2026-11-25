@@ -21,3 +21,14 @@ off-field incidents is run on GDELT (2017 to the day of the analysis; shown on t
 the simulation). `--offline` skips both.
 
 Projections are statistical scenarios, not financial advice or official valuations.
+
+## Possible next steps
+
+- **Star decline:** players worth more than €20m are still overestimated by about +0.27 in log
+  (about 30 %) at six years in the 2020 → 2026 validation; one-year errors are similar across value
+  bands, so the gap builds up over several years and a decline mechanism is still missing.
+- **Going public:** the repository is private; before opening it, rewrite the commit author email
+  to a GitHub no-reply address and add a licence.
+- **GDELT in bulk:** the GDELT DOC API is too heavily rate-limited for a historical collection; using
+  GDELT through Google BigQuery (needs a Google Cloud account) would allow testing press incidents
+  as a model input instead of an on-demand check shown on the fiche.
