@@ -80,8 +80,9 @@ def adjust_for_resilience(trans, r):
 
 def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, origin_t=None,
              seed=config.RANDOM_SEED, resid_scale=RESID_SCALE, resilience_override=None, live=None,
-             drift=True):
+             drift=True, progress=None):
     # drift : applique la correction de dérive calibrée (simulation/calibration.py)
+    # progress : fonction appelée après chaque trimestre simulé avec la part faite (0 -> 1)
     # live : mise à jour issue des matchs récents (collectors/live.py) :
     #   {"probs": probabilités d'état mises à jour, "obs": observations par trimestre}
     ctx = ctx or Context()
@@ -259,6 +260,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         out["value_nominal"][:, h] = np.exp(log_value + market_level + infl)
         out["points"][:, h] = collective.points_added(perf, share, ctx.col["beta"]) / 4
         out["moved"][:, h] = moved
+        if progress:
+            progress((h + 1) / steps)
 
     out["revenue"] = _revenues(out, t0, last.league)
     out["meta"] = {"player_id": player_id, "name": last.get("name"), "t0": t0, "age0": age0,
