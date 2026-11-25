@@ -12,4 +12,8 @@ python pipeline.py            # train every model from the collected data
 python Main.py "Rio Ngumoha"  # 2-page projection fiche in outputs/
 ```
 
+When a player is analysed, his current-season matches are fetched from FotMob and a press check of
+off-field incidents is run on GDELT (2017 to the day of the analysis; shown on the fiche, not used in
+the simulation). `--offline` skips both.
+
 Projections are statistical scenarios, not financial advice or official valuations.

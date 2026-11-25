@@ -17,6 +17,11 @@ HERE = Path(__file__).resolve().parent
 def preprocess(tex):
     # Les résultats sont insérés en ligne (pandoc ne lit pas \input)
     tex = tex.replace(r"\input{results.tex}", (HERE / "results.tex").read_text(encoding="utf-8"))
+    # Chiffres du texte (macros \num...) : remplacés directement par leur valeur
+    macros = dict(re.findall(r"\\newcommand\{\\(num\w+)\}\{([^}]*)\}",
+                             (HERE / "numbers.tex").read_text(encoding="utf-8")))
+    tex = tex.replace(r"\input{numbers.tex}", "")
+    tex = re.sub(r"\\(num[A-Za-z]+)(\{\})?", lambda m: macros[m.group(1)], tex)
 
     # Citations : numéros dans l'ordre de la bibliographie
     keys = re.findall(r"\\bibitem\{([^}]+)\}", tex)

@@ -7,6 +7,12 @@
 # À lancer quand de nouvelles données sont arrivées (fin de la collecte FotMob,
 # nouvelles pages vues Wikipédia...). Chaque étape lit le résultat de la
 # précédente : l'ordre compte.
+#
+# Collectes préalables (longues, à relancer seulement si besoin, reprise via le cache) :
+#     python -m collectors.transfermarkt     base Transfermarkt
+#     python -m collectors.fotmob            matchs de championnat (~26 000)
+#     python -m collectors.wikipedia         pages vues
+#     python -m collectors.tournaments       grands tournois de sélections (après "matching")
 # =============================================================================
 
 import sys

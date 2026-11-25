@@ -33,6 +33,7 @@ HISTORY = [
     ("Naive simulation", 0.81, 0.626, 0.995, 0.24),
     ("+ league changes, yearly talent tier", 0.70, 0.704, 0.896, 0.28),
     ("+ drift calibration", 0.39, 0.827, 0.22, 0.45),
+    ("+ complete FotMob data", 0.30, 0.796, -0.03, 0.51),
 ]
 
 
@@ -127,15 +128,79 @@ def fig_backtest(results, scale):
     plt.close(fig)
 
 
+def ablation_delta(base, variant, scale):
+    # Écart moyen d'erreur absolue (log) par joueur, variante - modèle retenu, et son erreur
+    # type, sur le critère principal (prix du départ contre vraie valeur). Les deux fichiers
+    # doivent venir du MÊME code : seule la variante testée diffère.
+    m = base[base.scale == scale].merge(variant[variant.scale == scale], on="player_id", suffixes=("", "_v"))
+    d = np.abs(np.log(m.median_v / m.truth_v)) - np.abs(np.log(m["median"] / m.truth))
+    return d.mean(), d.std() / np.sqrt(len(d))
+
+
+def second_validation(best):
+    # Validation 2023 -> 2026 et test de l'impact on/off (s'ils ont été calculés).
+    path23 = config.PROCESSED_DIR / "backtest_2023.parquet"
+    abl = config.PROCESSED_DIR / "ablation"
+    if not path23.exists():
+        return ""
+    r23 = pd.read_parquet(path23)
+    s23, _, _ = bt.report(r23)
+    row = s23.loc[best]
+    text = (f"\n\nA second, shorter validation starts in July 2023 and ends in June 2026 (three years, "
+            f"{int(row.joueurs)} players drawn in the same way). With the same noise scale and at 2023 prices, the 80\\% interval covers "
+            f"the truth in {row.couverture_80 * 100:.0f}\\% of cases and the bias is {row.biais_log:+.2f}. This second "
+            f"test matters for ingredients that exist only from 2020/21, which the 2020 validation cannot see.")
+    files = [abl / "backtest_with_onoff.parquet", abl / "backtest_with_onoff_2023.parquet"]
+    if all(f.exists() for f in files):
+        d20, se20 = ablation_delta(pd.read_parquet(config.PROCESSED_DIR / "backtest.parquet"), pd.read_parquet(files[0]), best)
+        d23, se23 = ablation_delta(r23, pd.read_parquet(files[1]), best)
+        text += (f" The on/off criterion is such an ingredient. Adding it to the performance index changes the mean "
+                 f"absolute error of the forecast medians by {d23:+.4f} (standard error {se23:.4f}) in logarithms over "
+                 f"2023--2026: no measurable gain, so it is not retained. Over 2020--2026 the change is {d20:+.4f} "
+                 f"({se20:.4f}); it cannot come from the criterion itself, which does not exist before 2020/21, but from "
+                 f"the context model, re-estimated with the new index on all seasons (see Section~\\ref{{sec:flaws}}).")
+    return text
+
+
+def age_markets():
+    # Hausse du marché selon l'âge, 2019/20 -> 2025/26 : valeur médiane des 24-28 ans
+    # (fin de saison) et variation médiane, d'une saison à l'autre, d'un même joueur de 25-27 ans.
+    q = pd.read_parquet(config.PROCESSED_DIR / "quarterly.parquet",
+                        columns=["player_id", "season", "quarter", "age", "market_value", "league_id"])
+    big5 = [l["transfermarkt"] for l in config.LEAGUES.values()]
+    q = q[q.league_id.isin(big5) & (q.market_value > 0) & (q.quarter == 4)]
+    start, end = config.BACKTEST_ORIGIN - 1, config.CURRENT_SEASON - 1
+    med = q[q.age.between(24, 28)].groupby("season").market_value.median()
+    young = float(np.log(med.loc[end] / med.loc[start]))
+    w = q[["player_id", "season", "age", "market_value"]]
+    pairs = w.merge(w.assign(season=w.season - 1), on=["player_id", "season"], suffixes=("", "_next"))
+    pairs = pairs[pairs.age.between(25, 27) & pairs.season.between(start, end - 1)]
+    prime = float(np.log(pairs.market_value_next / pairs.market_value).groupby(pairs.season).median().sum())
+    return young, prime
+
+
 def write_results(trans_top, example, results):
     by_scale, by_band, best = bt.report(results)
     b = by_scale.loc[best]
     r = results[results.scale == best]
+    # Trois comparaisons (evaluation/backtest.py) : prix de 2020 contre vraie valeur
+    # (principale), contre vraie valeur dégonflée par l'indice général, et euros courants.
     ratio_true = (r.truth / r.value_2020).median()
     ratio_pred = (r["median"] / r.value_2020).median()
+    ratio_pred_nom = (r.median_nominal / r.value_2020).median()
+    bias_nom = np.log(r.median_nominal / r.truth_nominal).mean()
+    bias_defl = np.log(r.median_deflated / r.truth_deflated).mean()
+    market = r.market_change.iloc[0]
+    from models import valuation
+    infl_2020 = valuation.fit(bt.ORIGIN_T)["inflation"]["drift"]
+    young, prime = age_markets()
     rows = "\n".join(f"{n} & {rp:.2f} & {cov * 100:.0f}\\% & {bias:+.2f} & {'--' if pit is None else f'{pit:.2f}'} \\\\"
                      for n, rp, cov, bias, pit in HISTORY)
-    rows += (f"\n\\textbf{{+ FotMob xG, defence and injuries (final)}} & \\textbf{{{ratio_pred:.2f}}} & \\textbf{{{b.couverture_80 * 100:.0f}\\%}}"
+    rows += (f"\n\\midrule\nFinal model, current euros & {ratio_pred_nom:.2f} & {r.in_80_nominal.mean() * 100:.0f}\\%"
+             f" & {bias_nom:+.2f} & {r.pit_nominal.mean():.2f} \\\\")
+    rows += (f"\nFinal model, 2020 prices, truth deflated by the market index & {ratio_pred:.2f} & "
+             f"{r.in_80_deflated.mean() * 100:.0f}\\% & {bias_defl:+.2f} & {r.pit_deflated.mean():.2f} \\\\")
+    rows += (f"\n\\textbf{{Final model, 2020 prices}} & \\textbf{{{ratio_pred:.2f}}} & \\textbf{{{b.couverture_80 * 100:.0f}\\%}}"
              f" & \\textbf{{{b.biais_log:+.2f}}} & \\textbf{{{r.pit.mean():.2f}}} \\\\")
     by_band = by_band.reindex([b for b in ["<5M", "5-20M", "20-50M", ">50M"] if b in by_band.index])
     band_rows = "\n".join(f"{band} & {int(x.joueurs)} & {x.couverture_80 * 100:.0f}\\% & {x.biais_log:+.2f} \\\\"
@@ -183,7 +248,7 @@ The Elo ratings computed with the conservation rule of Proposition~\\ref{{prop:e
 \\subsection{{Out-of-sample validation}}
 A model of this kind can always be made to look plausible on a few famous names. The only honest test is to forecast the past. We therefore placed ourselves in July 2020: every component (the hidden Markov model, the valuation equations, the event probabilities, the team-contribution model and the drift calibration) was re-estimated with data available at that date only. We then simulated six years ahead for {len(r)} players of the top five leagues, aged 18 to 32 and worth at least one million euros, stratified by value, and compared the forecasts with their true Transfermarkt values in June 2026.
 
-Three numbers summarise a probabilistic forecast. The \\emph{{coverage}} of the 80\\% interval should be close to 80\\%. The \\emph{{bias}} is the mean of $\\log(\\text{{forecast median}}/\\text{{truth}})$, ideally zero. The \\emph{{PIT}} is the fraction of simulated careers below the true value; if the forecasts are well calibrated it is uniformly distributed, with mean $0.5$. Table~\\ref{{tab:backtest}} shows how the model improved as its flaws were found and corrected. In reality the median player kept only {ratio_true:.2f} of his 2020 value six years later; the naive simulation predicted 0.81.
+Three numbers summarise a probabilistic forecast. The \\emph{{coverage}} of the 80\\% interval should be close to 80\\%. The \\emph{{bias}} is the mean of $\\log(\\text{{forecast median}}/\\text{{truth}})$, ideally zero. The \\emph{{PIT}} is the fraction of simulated careers below the true value; if the forecasts are well calibrated it is uniformly distributed, with mean $0.5$. Table~\\ref{{tab:backtest}} shows how the model improved as its flaws were found and corrected. In reality the median player kept only {ratio_true:.2f} of his 2020 value six years later; the naive simulation predicted 0.81. The earlier versions were scored in current euros, so their forecasts also contained a forecast of market inflation, and that forecast turned out to dominate the error. With data up to 2020 the season effects grow by {(np.exp(infl_2020) - 1) * 100:.0f}\\% a year (the 2015--2019 boom); the index estimated on all the data grows by {(np.exp(market) - 1) * 100:.0f}\\% in total between 2020 and 2026. Moreover the growth was uneven across ages: the median value of players aged 24--28 rose by {(np.exp(young) - 1) * 100:.0f}\\% over the period, whereas the value of a given player aged 25--27 changed by {(np.exp(prime) - 1) * 100:+.0f}\\% in total over the same seasons (sum of median yearly changes). The tested players age by six years during the test, so the general index overstates the inflation of their own market. Market inflation is a forecast of its own, which the career model cannot be expected to make. The final model is therefore judged at 2020 prices against the true 2026 value, and Table~\\ref{{tab:backtest}} also reports the comparison with the true value deflated by the general index and the forecast in current euros.
 
 \\begin{{table}}[h]
 \\centering
@@ -196,7 +261,7 @@ Model & value ratio 2026/2020 & 80\\% coverage & bias (log) & mean PIT \\\\
 True outcome & {ratio_true:.2f} & 80\\% & 0 & 0.50 \\\\
 \\bottomrule
 \\end{{tabular}}
-\\caption{{Out-of-sample forecasts from July 2020 to June 2026 ({len(r)} players).}}
+\\caption{{Out-of-sample forecasts from July 2020 to June 2026 ({len(r)} players). Earlier versions and the first final line are scored in current euros, the last three lines differ only in how market inflation is treated (see text).}}
 \\label{{tab:backtest}}
 \\end{{table}}
 
@@ -215,7 +280,9 @@ noise scale & 50\\% coverage & 80\\% coverage & 90\\% coverage & width of 80\\% 
 \\label{{tab:scale}}
 \\end{{table}}
 
-Coverage is similar across value bands (Table~\\ref{{tab:bands}}), but the bias changes sign: the model slightly overestimates the future value of players already worth more than 20 million euros and underestimates that of cheaper players. The overall bias is small only because these two errors largely cancel.
+{second_validation(best)}
+
+Coverage is similar across value bands (Table~\\ref{{tab:bands}}), but the bias is not: it ranges from {by_band.biais_log.min():+.2f} to {by_band.biais_log.max():+.2f}, and the forecasts remain too high for players already worth more than 20 million euros in 2020. The decline of stars is the part of a career that the model captures least well.
 
 \\begin{{table}}[h]
 \\centering
@@ -240,9 +307,72 @@ value in 2020 & players & 80\\% coverage & bias (log) \\\\
     (OUT / "results.tex").write_text(text, encoding="utf-8")
 
 
+def write_numbers(ctx):
+    # Tous les chiffres cités dans le texte du papier (hors section Results), sous
+    # forme de macros LaTeX : \num... Le papier ne contient AUCUN chiffre de modèle
+    # écrit à la main, il ne peut donc pas diverger du code.
+    import json
+    from collectors import tournaments as tn
+    from features import quarterly as qt
+    from models import performance as pf
+    from simulation import calibration
+
+    def fmt_int(x):
+        return f"{int(round(x)):,}".replace(",", "\\,")
+
+    q = pd.read_parquet(qt.OUT_PATH, columns=["player_id", "t"])
+    perf = pd.read_parquet(pf.OUT_PATH, columns=["perf", "perf_source", "t"])
+    fm_cols = pd.read_parquet(qt.OUT_PATH, columns=["xg_minutes", "fm_minutes"])
+    context = json.loads(pf.CONTEXT_PATH.read_text())
+    diag = ctx.val["diagnostics"]
+    params, ev = ctx.hmm["params"], ctx.ev
+    # Attaquants de 23-25 ans (comme la figure des transitions) : rester "Fort" d'un trimestre à l'autre
+    stay_top = params["trans"][hmm.class_index(2, 3, 2)][hmm.FORT, hmm.FORT]
+    stay_bottom = params["trans"][hmm.class_index(2, 3, 0)][hmm.FORT, hmm.FORT]
+    age_bin = lambda a: int(np.digitize(a, hmm.AGE_BINS[1:-1]))
+    calib = calibration.load(full=True)
+    tour = tn.load()
+    played = tour[tour.minutes > 0]
+    reliability = pd.read_parquet(qt.ABSENCE_RELIABILITY_PATH)
+    rated = perf[perf.perf.notna()]
+    fm_rows = fm_cols[fm_cols.fm_minutes > 0]
+    numbers = {
+        "Players": fmt_int(q.player_id.nunique()), "PlayerQuarters": fmt_int(len(q)),
+        "BetaOwn": f"{context['own']:+.3f}", "BetaOpp": f"{context['opp']:+.3f}",
+        "StayStrongTop": f"{stay_top:.2f}", "StayStrongBottom": f"{stay_bottom:.2f}",
+        "LeaveTopOld": f"{ev['destination'][age_bin(32), 1, 2] * 100:.0f}",
+        "LeaveTopYoungStar": f"{ev['destination'][age_bin(23), 2, 2] * 100:.0f}",
+        "RsqLevel": f"{diag['r2_level'] * 100:.0f}", "RsqDyn": f"{diag['r2_dynamic'] * 100:.0f}",
+        "Bdyn": f"{diag['b']:.2f}", "SigmaA": f"{diag['annual_sd']:.2f}",
+        "NBig": fmt_int(diag["n_big"]), "BigBias": f"{(np.exp(diag['big_bias']) - 1) * 100:.0f}",
+        "Inflation": f"{(np.exp(ctx.val['inflation']['drift']) - 1) * 100:.1f}",
+        "CalibCases": fmt_int(len(calib["gaps"])),
+        "CalibGap": f"{-calib['gaps'].gap.median() * 100:.0f}",
+        "GapBandMin": f"{calib['gaps'].groupby('band').gap.median().min():+.2f}",
+        "GapBandMax": f"{calib['gaps'].groupby('band').gap.median().max():+.2f}",
+        "TournamentMatches": fmt_int(played.match_id.nunique()),
+        "TournamentLinked": f"{played.tm_player_id.notna().mean() * 100:.0f}",
+        "AbsenceKept": str(int((reliability.consistent_share >= qt.ABSENCE_RELIABILITY).sum())),
+        "AbsenceTotal": str(len(reliability)),
+        "ShareGoalsAssists": f"{(rated.perf_source == 'transfermarkt').mean() * 100:.0f}",
+        "ShareXg": f"{(fm_rows.xg_minutes > 0).mean() * 100:.0f}",
+    }
+    # Validation 2020 -> 2026 (niveau de bruit retenu)
+    results = pd.read_parquet(config.PROCESSED_DIR / "backtest.parquet")
+    by_scale, by_band, best = bt.report(results)
+    final = results[results.scale == best]
+    numbers.update({"FinalCoverage": f"{by_scale.loc[best, 'couverture_80'] * 100:.0f}",
+                    "FinalBias": f"{by_scale.loc[best, 'biais_log']:+.2f}", "FinalPit": f"{final.pit.mean():.2f}",
+                    "BandBiasMin": f"{by_band.biais_log.min():+.2f}", "BandBiasMax": f"{by_band.biais_log.max():+.2f}"})
+    lines = [f"\\newcommand{{\\num{k}}}{{{v}}}" for k, v in numbers.items()]
+    (OUT / "numbers.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return numbers
+
+
 def main():
     FIG.mkdir(exist_ok=True)
     ctx = mc.Context()
+    write_numbers(ctx)
     trans_top = fig_transitions(ctx.hmm["params"])
     fig_elo()
     example = player_example(ctx, "Bukayo Saka")

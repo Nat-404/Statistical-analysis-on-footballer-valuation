@@ -23,12 +23,13 @@ import pandas as pd
 
 import config
 from models import collective, events, hmm, revenue, valuation
+from simulation import calibration
 
 K = len(config.STATES)
 FAMILY_INDEX = hmm.FAMILIES
 QUARTER_MATCHES = 13          # matchs de championnat par trimestre, en moyenne
 CLUB_MEAN_REVERSION = 0.15    # vitesse à laquelle l'Elo d'un club revient vers son niveau habituel
-RESID_SCALE = 0.25            # niveau de bruit retenu par la validation 2020 -> 2026 (couverture 80 % ≈ 80 %)
+RESID_SCALE = 1.0             # bruit retenu par les validations 2020 -> 2026 et 2023 -> 2026 (couverture 80 % : 75 % et 84 %)
 
 
 class Context:
@@ -57,7 +58,6 @@ class Context:
         if fitted:
             self.drift = fitted.get("drift")
         else:
-            from simulation import calibration
             self.drift = calibration.load()
 
 
@@ -132,10 +132,12 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
 
     share_edges = np.array(hmm.SHARE_BINS)
     centering = val["contract_centering"]
-    # Niveau du marché figé à la DATE DE DÉPART ("sans inflation" = aux prix du
-    # marché au moment du départ) ; l'inflation future est ajoutée à part.
-    # (borné aux saisons connues du modèle dynamique, qui commence un an après les données)
-    market_season = str(int(np.clip(int(last.season), val.get("dyn_first_season", 2015), val["last_season"])))
+    # Niveau du marché à la DATE DE DÉPART ("sans inflation" = aux prix du marché au
+    # moment du départ). Le modèle dynamique travaille sur des valeurs DÉFLATÉES
+    # (valeur / niveau du marché) : on retire ce niveau au départ et on le remet en
+    # sortie ; l'inflation future est ajoutée à part (valeurs "nominales").
+    index = val["inflation"]["index"]
+    market_level = float(index[int(np.clip(int(last.season), min(index), max(index)))])
 
     def features(state, perf_recent, share_recent, elo, contract, national_flag, age, log_lag, quarter=4,
                  league=last.league):
@@ -148,7 +150,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
             "family": last.family, "age_c": min(age - 26, 14), "elo_c": (elo - 1600) / 100,
             "league": league, "log_views": last.log_views, "has_views": last.has_views,
             "national": national_flag, "eu": last.eu, "left_foot": last.left_foot,
-            "height_c": last.height_c, "season": market_season, "quarter": quarter,
+            "height_c": last.height_c, "quarter": quarter,
         })
         for col, (lo_c, hi_c) in valuation.CONTRACT_BINS.items():
             feat[col] = ((contract > lo_c) & (contract <= hi_c)).astype(float) - centering[col]
@@ -164,7 +166,8 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
     b_dyn = float(val["dynamic"].params["log_lag"])
     c = b_dyn ** 0.25
     quarterly_sd = val["annual_sd"] / np.sqrt(1 + c ** 2 + c ** 4 + c ** 6)
-    log_value = np.full(n, float(np.log(last.market_value)) if last.market_value > 0 else np.log(1e5))
+    # (valeur déflatée en log ; + market_level = valeur aux prix du départ)
+    log_value = np.full(n, (float(np.log(last.market_value)) if last.market_value > 0 else np.log(1e5)) - market_level)
     infl = np.zeros(n)                                     # inflation cumulée depuis le départ
 
     out = {k: np.zeros((n, steps)) for k in ("state", "share", "perf", "elo", "value_real", "value_nominal",
@@ -177,7 +180,7 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         age_bin = int(np.digitize(age, hmm.AGE_BINS[1:-1]))
         if quarter == 1 and h > 0:
             # Recalcul annuel du niveau de talent à partir de la valeur simulée
-            tier = np.digitize(np.exp(log_value), ev["tier_cuts"][age_bin])
+            tier = np.digitize(np.exp(log_value + market_level), ev["tier_cuts"][age_bin])
         cls = hmm.class_index(age_bin, family, tier)            # une classe par carrière
 
         # 1. Nouvel état (chaîne de Markov ajustée par la résilience)
@@ -210,7 +213,6 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         contract = np.where(moved, ev["contract"]["new_contract_years_after_transfer"], contract)
         # 3c. Club : saut d'Elo en cas de transfert, sinon retour progressif vers son niveau
         jumps = np.array([rng.choice(ev["elo_jump"][s]) for s in prev_state[moved]]) if moved.any() else []
-        elo_home = np.where(moved, elo_home, elo_home)
         if moved.any():
             elo_home[moved] = elo[moved] + jumps
         elo = elo + CLUB_MEAN_REVERSION * (elo_home - elo) + rng.normal(0, ev["elo_sd"] * 0.5, n)
@@ -244,15 +246,17 @@ def simulate(player_id, ctx=None, n=config.N_SIMULATIONS, steps=config.N_STEPS, 
         log_value = (log_value + (1 - c) * (equilibrium - log_value)
                      + resid_scale * quarterly_sd * rng.normal(0, 1, n))
         if drift and ctx.drift is not None:
-            log_value = log_value + ctx.drift[age_bin, tier] / 4     # correction calibrée (par an -> par trimestre)
+            # correction calibrée (par an -> par trimestre), selon la tranche de valeur ACTUELLE
+            band = calibration.value_band(np.exp(log_value + market_level))
+            log_value = log_value + ctx.drift[age_bin, band] / 4
         infl = infl + val["inflation"]["drift"] / 4 + rng.normal(0, val["inflation"]["vol"] / 2, n)
 
         out["state"][:, h] = state
         out["share"][:, h] = share
         out["perf"][:, h] = perf
         out["elo"][:, h] = elo
-        out["value_real"][:, h] = np.exp(log_value)
-        out["value_nominal"][:, h] = np.exp(log_value + infl)
+        out["value_real"][:, h] = np.exp(log_value + market_level)
+        out["value_nominal"][:, h] = np.exp(log_value + market_level + infl)
         out["points"][:, h] = collective.points_added(perf, share, ctx.col["beta"]) / 4
         out["moved"][:, h] = moved
 

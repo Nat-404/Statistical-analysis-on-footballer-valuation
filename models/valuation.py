@@ -49,8 +49,25 @@ FORMULA = (
 )
 # C(quarter) : Transfermarkt publie ses valeurs surtout à certaines périodes
 # (été, hiver) ; cet effet "calendrier" évite des dents de scie artificielles.
-# Même formule, avec en plus la valeur d'il y a un an (log_lag)
-DYNAMIC_FORMULA = FORMULA.replace("log_value ~ ", "log_value ~ log_lag + ")
+# Modèle dynamique : même formule, avec la valeur d'il y a un an (log_lag) et SANS
+# effet saison, car il est estimé sur des valeurs DÉFLATÉES de l'inflation du
+# marché (voir fit). Ainsi une simulation "à prix constants" n'a pas d'effet
+# saison à figer, et l'inflation n'est ajoutée qu'une fois, à part.
+DYNAMIC_FORMULA = FORMULA.replace("log_value ~ ", "log_value ~ log_lag + ").replace(" + C(season)", "")
+
+# Variables qui peuvent être CONSTANTES sur une période d'entraînement : par exemple
+# le contrat restant, connu seulement en 2025/26, est nul partout quand on
+# entraîne avec les données de 2020 (validation). Une colonne constante rend la
+# régression indéterminée ("rang déficient") : on la retire explicitement.
+OPTIONAL_TERMS = ["c_lt1", "c_1_2", "c_2_3", "national", "log_views", "has_views", "eu", "left_foot", "height_c"]
+
+
+def usable_formula(formula, data):
+    # Retire de la formule les variables sans aucune variation dans les données.
+    dropped = [c for c in OPTIONAL_TERMS if data[c].nunique() <= 1]
+    for c in dropped:
+        formula = formula.replace(f" + {c}", "")
+    return formula, dropped
 
 
 def build_features(df):
@@ -60,10 +77,15 @@ def build_features(df):
     g = df.groupby("player_id")
     df["perf_recent"] = g.perf_adj.transform(lambda s: s.rolling(4, min_periods=1).mean()).fillna(0)
     df["share_recent"] = g.minutes_share.transform(lambda s: s.rolling(4, min_periods=1).mean()).fillna(0)
+    # Popularité (pages vues Wikipédia, moyenne des 4 derniers trimestres). Les pages
+    # vues n'existent qu'à partir de juillet 2015 : "a une page Wikipédia" est donc
+    # une propriété du JOUEUR (et non de la disponibilité des données), et avant
+    # juillet 2015 on reprend sa première popularité connue. Sinon, l'absence de
+    # données en 2014 serait confondue avec l'effet de la saison (fausse inflation).
     views = df["wiki_views"] if "wiki_views" in df else pd.Series(np.nan, index=df.index)
-    df["log_views"] = np.log1p(views.groupby(df.player_id).transform(
-        lambda s: s.rolling(4, min_periods=1).mean())).fillna(0)
-    df["has_views"] = views.notna().astype(int)
+    log_views = np.log1p(views.groupby(df.player_id).transform(lambda s: s.rolling(4, min_periods=1).mean()))
+    df["log_views"] = log_views.groupby(df.player_id).bfill().fillna(0)
+    df["has_views"] = views.notna().groupby(df.player_id).transform("any").astype(int)
     df["national"] = (g.minutes_national.transform(lambda s: s.rolling(8, min_periods=1).sum()) > 0).astype(int)
     df["family"] = df.pos_group.map({"GK": "GK", "CB": "DEF", "FB": "DEF", "MID": "MID", "AMW": "ATT", "FW": "ATT"})
     df["age_c"] = df.age - 26
@@ -118,12 +140,25 @@ def fit(cutoff_t=None, states=None):
     df = load_training(cutoff_t, states)
     train = df[df.fresh & df.family.notna()].copy()
     train["season"] = train.season.astype(str)
-    model = smf.ols(FORMULA, train).fit()
+    formula, dropped = usable_formula(FORMULA, train)
+    model = smf.ols(formula, train).fit()
     # Moyennes de centrage des indicateurs de contrat (à réappliquer en simulation)
     recent = (df.season >= config.CURRENT_SEASON - 1) & df.contract_years.notna()
     # (aucun contrat connu, ex. validation sur 2020 -> centrage 0 et effet contrat nul)
     centering = {col: float(np.nan_to_num(((df.contract_years > lo) & (df.contract_years <= hi))[recent].mean()))
                  for col, (lo, hi) in CONTRACT_BINS.items()}
+
+    # Indice d'inflation : coefficient de chaque saison (par rapport à la 1re)
+    seasons = sorted(train.season.unique())
+    index = {int(s): model.params.get(f"C(season)[T.{s}]", 0.0) for s in seasons}
+    # Tendance annuelle : pente d'une régression des effets saison sur les années
+    # (moins sensible aux extrémités qu'une moyenne des variations). La 1re saison
+    # est exclue : ses moyennes glissantes (performance, popularité, sélection sur
+    # 2 ans) n'ont pas encore d'historique, ce qui fausse son niveau.
+    used = [s for s in sorted(index) if s > min(index)]
+    levels = np.array([index[s] for s in used])
+    inflation = {"index": index, "drift": float(np.polyfit(used, levels, 1)[0]),
+                 "vol": float(np.std(np.diff(levels))), "first_season_used": used[0]}
 
     # MODÈLE DYNAMIQUE (celui utilisé par la simulation).
     # Le modèle "en niveau" ci-dessus explique mal le prix des stars (il lui
@@ -137,29 +172,42 @@ def fit(cutoff_t=None, states=None):
     lag = df[["player_id", "t", "market_value"]].assign(t=df.t + 4).rename(columns={"market_value": "lag_value"})
     dyn = df.merge(lag, on=["player_id", "t"], how="left")
     dyn = dyn[dyn.fresh & dyn.family.notna() & (dyn.lag_value > 0)].copy()
-    dyn["log_lag"] = np.log(dyn.lag_value)
-    dyn["season"] = dyn.season.astype(str)
-    dynamic = smf.ols(DYNAMIC_FORMULA, dyn).fit()
+    # Valeurs DÉFLATÉES : on retire le niveau du marché de chaque saison (indice ci-dessus).
+    # Sans cela, l'effet saison du modèle dynamique contiendrait la hausse du marché de
+    # l'année, et figer une saison pour simuler "à prix constants" rajouterait cette
+    # hausse chaque année simulée (optimisme parasite de plusieurs % par an).
+    # On écarte les paires dont l'année de départ est la 1re saison (niveau non fiable).
+    dyn = dyn[dyn.season.isin(used) & (dyn.season - 1).isin(used)].copy()
+    dyn["log_value"] = dyn.log_value - dyn.season.map(index)
+    dyn["log_lag"] = np.log(dyn.lag_value) - (dyn.season - 1).map(index)
+    dyn_formula, dyn_dropped = usable_formula(DYNAMIC_FORMULA, dyn)
+    dynamic = smf.ols(dyn_formula, dyn).fit()
     # Écart entre la valeur réelle et le modèle dynamique : persiste-t-il d'une année sur l'autre ?
     dyn["resid"] = dynamic.resid
     nxt = dyn[["player_id", "t", "resid"]].assign(t=dyn.t - 4)
     pairs = dyn.merge(nxt, on=["player_id", "t"], suffixes=("", "_next"))
     resid_persistence = float(np.polyfit(pairs.resid, pairs.resid_next, 1)[0])
-
-    # Indice d'inflation : coefficient de chaque saison (par rapport à la 1re)
-    seasons = sorted(train.season.unique())
-    index = {int(s): model.params.get(f"C(season)[T.{s}]", 0.0) for s in seasons}
-    # Tendance annuelle moyenne sur TOUTE la période (plus stable qu'une fenêtre courte)
-    steps = np.diff([index[s] for s in sorted(index)])
-    inflation = {"index": index, "drift": float(np.mean(steps)), "vol": float(np.std(steps))}
+    # Prévisions à un an des joueurs valant plus de 100 M€ (cité dans le papier)
+    big = (dyn.lag_value > 100e6).to_numpy()
+    big_check = {"n_big": int(big.sum()), "big_bias": float(-dynamic.resid.to_numpy()[big].mean()) if big.any() else 0.0}
     return {"model": model, "dynamic": dynamic, "annual_sd": float(np.sqrt(dynamic.scale)),
             "resid_persistence": resid_persistence, "inflation": inflation,
             "contract_centering": centering, "last_season": int(max(seasons)),
-            "dyn_first_season": int(min(dyn.season.astype(int)))}
+            "dyn_first_season": int(min(dyn.season.astype(int))),
+            "dropped_terms": sorted(set(dropped) | set(dyn_dropped)), "big_check": big_check}
+
+
+def diagnostics(result):
+    # Chiffres de qualité cités dans le papier (calculés AVANT d'effacer les données).
+    dyn = result["dynamic"]
+    return {"r2_level": float(result["model"].rsquared), "r2_dynamic": float(dyn.rsquared),
+            "b": float(dyn.params["log_lag"]), "annual_sd": result["annual_sd"], "n_dynamic": int(dyn.nobs),
+            **result["big_check"]}
 
 
 def build():
     result = fit()
+    result["diagnostics"] = diagnostics(result)
     # statsmodels garde une copie des données d'entraînement (~600 Mo) : inutile pour prédire
     result["model"].remove_data()
     result["dynamic"].remove_data()
@@ -175,4 +223,4 @@ def load():
 
 if __name__ == "__main__":
     r = build()
-    print(r["model"].rsquared, r["rho"], r["inflation"])
+    print(r["inflation"], "variables retirées :", r["dropped_terms"])

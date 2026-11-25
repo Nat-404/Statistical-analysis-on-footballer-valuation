@@ -2,7 +2,13 @@
 # Main.py — Point d'entrée : analyse complète d'un joueur.
 #
 #     python Main.py "Bukayo Saka"          -> fiche PDF de 2 pages dans outputs/
+#     python Main.py "Bukayo Saka" --offline -> sans aucune requête en ligne
 #     python Main.py --check                -> vérifie l'installation
+#
+# Au lancement (sauf --offline), deux sources sont interrogées pour CE joueur :
+#   - FotMob : ses matchs de la saison en cours (met à jour son état de départ) ;
+#   - GDELT  : contrôle presse des incidents hors terrain, 2017 -> aujourd'hui
+#              (affiché dans la fiche, sans modifier la simulation).
 #
 # Étapes : 1) trouver le joueur  2) charger les modèles entraînés
 #          3) simuler 10 000 carrières sur 6 ans  4) écrire la fiche PDF
@@ -55,7 +61,7 @@ def main():
     from simulation import monte_carlo as mc
 
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    offline = "--offline" in sys.argv          # --offline : pas de récupération FotMob à la demande
+    offline = "--offline" in sys.argv          # --offline : aucune requête en ligne (FotMob, GDELT)
     print("Chargement des modèles…")
     ctx = mc.Context()
     player_id = find_player(ctx, " ".join(args))
@@ -79,10 +85,19 @@ def main():
         else:
             print("  aucune donnée récente trouvée (départ en juillet 2026)")
 
+    # Contrôle presse (GDELT), à la demande : données à jour au jour près
+    press = None
+    if not offline:
+        from collectors import gdelt
+        name = ctx.panel[ctx.panel.player_id == player_id].sort_values("t").iloc[-1]["name"]
+        print("Contrôle presse GDELT (peut prendre 1 à 5 minutes, l'API limite les requêtes)…")
+        press = gdelt.run(name)
+        print("  " + (gdelt.summary_en(press) or ""))
+
     print(f"Simulation de {config.N_SIMULATIONS:,} carrières…")
     sim = mc.simulate(player_id, ctx, live=live)
     from reporting import fiche
-    pdf = fiche.build_fiche(player_id, ctx, sim, live=live)
+    pdf = fiche.build_fiche(player_id, ctx, sim, live=live, press=press)
     print(f"✓ Fiche de projection (2 pages, anglais) : {pdf}")
     if "--html" in sys.argv:                    # page web interactive détaillée, en option
         path, _ = report.build_report(player_id, ctx, live=live)

@@ -24,7 +24,7 @@
       vertical-align: middle;
     }
   </style>
-  <link rel="stylesheet" href="amsart.css?v=1795533721" />
+  <link rel="stylesheet" href="amsart.css?v=1795616890" />
   <script defer=""
   src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml-full.js"
   type="text/javascript"></script>
@@ -560,12 +560,34 @@ youth clubs, contracts and player profiles. The dataset stopped updating
 in July 2026.</p></li>
 <li><p><strong>FotMob</strong>, whose data come from Opta: for the
 matches of the top five leagues (from 2018/19) and their second
-divisions (from 2021/22), per-player statistics (expected goals and
-assists, passes, duels, tackles, saves, goals prevented), shot maps and
-line-ups including absent players and the reason for their absence.
-Expected goals are available from 2018/19. FotMob replaced Understat,
-which went offline in November 2026, and its injury lists provide the
-absence data missing from Transfermarkt.</p></li>
+divisions (from 2021/22), per-player statistics (passes, duels, tackles,
+saves), shot maps with expected goals, and line-ups including absent
+players and the reason for their absence. FotMob replaced Understat,
+which went offline in November 2026. Two properties of these data were
+only discovered after the full collection, and both matter. First, shot
+maps, hence expected goals, exist only from 2020/21 in the top divisions
+(from 2021/22 in the English and German second divisions, from 2025/26
+in the others): before that date the expected-goals statistics are
+treated as <em>missing</em>, not as zero, and per-90 rates use only the
+minutes played in matches with shot maps. Second, the lists of absent
+players were rewritten after the fact for several seasons: in a match of
+December 2023, a striker appears both in the starting line-up of his
+club and in the injury list of a club he would only join a year later,
+with an expected return date in 2025. We keep an absence only when the
+player belonged to that club at that date and did not play the match,
+and only for the <span class="math inline">\(22\)</span> league-seasons
+(out of <span class="math inline">\(64\)</span>) in which at least 70%
+of the listed absences pass this check; elsewhere the absence
+information is treated as unknown.</p></li>
+<li><p><strong>Major international tournaments</strong>: Transfermarkt
+lists the matches of World Cups and European Championships since 2006
+but contains the players’ line-ups only from 2025/26. We therefore
+collected from FotMob the line-ups of every World Cup, European
+Championship, Copa América, Africa Cup of Nations and Asian Cup since
+2014 (<span class="math inline">\(1\,001\)</span> matches), and linked
+players to Transfermarkt through the club-match correspondence or,
+failing that, by name, nationality and year of birth (<span
+class="math inline">\(82\%\)</span> of appearances linked).</p></li>
 <li><p><strong>Wikipedia page views</strong> (five languages), linked to
 Transfermarkt identifiers through Wikidata property P2446, as a measure
 of popularity.</p></li>
@@ -640,9 +662,26 @@ goalkeeper: goals prevented, that is expected goals on target faced
 minus goals conceded) and convert each into a <span
 class="math inline">\(z\)</span>-score relative to players of the same
 position group in the same season. The index is a weighted average of
-these <span class="math inline">\(z\)</span>-scores. When FotMob data
-are missing we fall back on goals plus assists for attacking
-players.</p>
+these <span class="math inline">\(z\)</span>-scores, standardised once
+more within position group and season. This last step matters: an
+average of correlated <span class="math inline">\(z\)</span>-scores has
+a standard deviation well below one (about <span
+class="math inline">\(0.6\)</span> here), whereas the goals-plus-assists
+fallback used before FotMob coverage is a single <span
+class="math inline">\(z\)</span>-score. Without it the seasons 2014–2017
+looked twice as dispersed as the later ones, and the hidden Markov model
+used its two upper states to describe that dispersion instead of
+genuinely strong players. We also tested a collective criterion, the
+<em>on/off</em> impact: the expected-goal difference of the team per 90
+minutes while the player is on the pitch minus the same difference while
+he is on the team sheet but off the pitch, shrunk towards zero by the
+factor <span class="math inline">\(m/(m+600)\)</span> with <span
+class="math inline">\(m=(1/m_{\text{on}}+1/m_{\text{off}})^{-1}\)</span>,
+since a difference measured over a few minutes is mostly noise. It did
+not improve the out-of-sample forecasts (Section <a href="#sec:results"
+data-reference-type="ref" data-reference="sec:results">8</a>) and is not
+part of the final index. When FotMob data are missing we fall back on
+goals plus assists for attacking players.</p>
 <p>Raw statistics flatter players of dominant teams. To separate the
 player from his team we fit a linear mixed model <span
 class="math display">\[\text{index}_{it} = u_i +
@@ -656,11 +695,10 @@ points), and <span class="math inline">\(\lambda_\ell\)</span> is a
 league effect. Players who change clubs identify <span
 class="math inline">\(\beta_1\)</span> separately from <span
 class="math inline">\(u_i\)</span>. We find <span
-class="math inline">\(\beta_1\approx+0.125\)</span> and <span
-class="math inline">\(\beta_2\approx-0.104\)</span>: one hundred Elo
-points of team strength inflate the index by an eighth of a standard
-deviation. The <em>adjusted index</em> subtracts the estimated
-context.</p>
+class="math inline">\(\beta_1\approx+0.146\)</span> and <span
+class="math inline">\(\beta_2\approx-0.101\)</span>, in standard
+deviations of the index per hundred Elo points. The <em>adjusted
+index</em> subtracts the estimated context.</p>
 <h2 data-number="7.2" id="the-hidden-markov-model"><span
 class="header-section-number">7.2</span> The hidden Markov model</h2>
 <p>The latent state space is <span
@@ -690,9 +728,9 @@ transitions from a handful of cases, each matrix is shrunk towards the
 average matrix of its age band and tier with a Dirichlet prior of weight
 30. The tier is what gives the chain a memory: in the estimated model a
 Strong player of the top tier stays Strong from one quarter to the next
-with probability <span class="math inline">\(0.94\)</span>, against
-<span class="math inline">\(0.10\)</span> for a Strong player of the
-bottom tier.</p>
+with probability <span class="math inline">\(0.93\)</span>, against
+<span class="math inline">\(0.11\)</span> for a Strong player of the
+bottom tier (attacking players aged 23 to 25).</p>
 <h2 data-number="7.3" id="resilience"><span
 class="header-section-number">7.3</span> Resilience</h2>
 <p>To capture the idea that some players rebound from bad spells and
@@ -736,9 +774,11 @@ towards group averages.</p>
 depends on state, age band and quarter (it is highest in May–July and
 lowest in February–April). The destination is drawn among “same league”,
 “another top-five league” and “outside the top five” with frequencies
-depending on age and tier: an average 32-year-old who moves leaves the
-top five in 54% of cases, a top-tier 23-year-old in 7%. A player outside
-the top five may come back.</p></li>
+depending on age and tier: a 32-year-old of the middle tier who moves
+leaves the top five in <span class="math inline">\(38\%\)</span> of
+cases, a top-tier 23-year-old in <span
+class="math inline">\(7\%\)</span>. A player outside the top five may
+come back.</p></li>
 <li><p><em>Club strength</em>: the Elo rating of the club follows a
 mean-reverting process; a transfer moves it by an amount drawn from the
 empirical distribution of rating gaps between departure and arrival
@@ -749,8 +789,9 @@ records contract histories, so renewal probabilities are assumptions
 (from 15% per year for a Marginal player to 60% for an Elite one). An
 expired contract means a free transfer.</p></li>
 <li><p><em>Major tournaments</em> (Euro 2028, World Cup 2030), whose
-participation probabilities by state and age are estimated from past
-tournaments, and <em>red cards</em>, which remove matches.</p></li>
+participation probabilities by state and age are estimated from the
+tournaments of 2014–2026, and <em>red cards</em>, which remove
+matches.</p></li>
 </ul>
 <h2 data-number="7.5" id="a-dynamic-valuation-equation"><span
 class="header-section-number">7.5</span> A dynamic valuation
@@ -759,18 +800,30 @@ equation</h2>
 market value. A first “level” regression of <span
 class="math inline">\(y_t\)</span> on state probabilities, recent
 performance, playing time, age (a cubic by position group), club Elo,
-league, contract length, popularity, nationality, foot, height and
-season effects explains 66% of the variance, but it cannot explain why
-stars are worth what they are. The market itself starts from the current
-price and adjusts it, so we estimate the dynamic equation <span
+league, contract length, popularity, national-team appearances at major
+tournaments, nationality, foot, height and season effects explains <span
+class="math inline">\(77\%\)</span> of the variance, but it cannot
+explain why stars are worth what they are. The market itself starts from
+the current price and adjusts it, so we estimate a dynamic equation. Let
+<span class="math inline">\(I_s\)</span> be the season effects of the
+level regression, a market index, and let <span
+class="math inline">\(y_t\)</span> now denote the log value
+<em>deflated</em> by this index, <span class="math inline">\(\log V_t -
+I_{s(t)}\)</span>. We estimate <span
 class="math display">\[\begin{equation}
 \tag{7.1}
 y_{t+4} = a + b\,y_t + \gamma^\top X_{t+4} + \eta_{t+4},
-\end{equation}\]</span> which explains 88% of the variance, with <span
-class="math inline">\(b\approx0.56\)</span> and a residual standard
+\end{equation}\]</span> which explains <span
+class="math inline">\(88\%\)</span> of the variance, with <span
+class="math inline">\(b\approx0.55\)</span> and a residual standard
 deviation <span class="math inline">\(\sigma_a\approx0.53\)</span>. Over
-the 189 cases of players worth more than 100 million euros, its one-year
-predictions are on average 5% too high. The simulation runs quarter by
+the <span class="math inline">\(184\)</span> cases of players worth more
+than 100 million euros, its one-year predictions are on average <span
+class="math inline">\(10\%\)</span> too high (a negative figure means
+too low). A variable that does not vary over the estimation period is
+removed from the equation rather than left to make it indeterminate:
+this happens to contract length, known only in 2025/26, when the model
+is re-estimated with data up to 2020. The simulation runs quarter by
 quarter, so we need a quarterly version of (7.1).</p>
 <div id="prop:partial" class="proposition">
 <p><strong>Proposition 17</strong>. <em>Let <span
@@ -803,10 +856,26 @@ on the same quarter one year before. Because the four quarterly chains
 started from four different historical values, the simulated paths had a
 saw-tooth pattern; Proposition <a href="#prop:partial"
 data-reference-type="ref" data-reference="prop:partial">17</a> removes
-it. “Real” values hold the market level of the forecast date fixed;
-“nominal” values add a random walk for market inflation whose drift
-(<span class="math inline">\(+5.9\%\)</span> per year) and volatility
-are estimated from the season effects.</p>
+it. Working with deflated values is not a detail. A first version
+estimated (7.1) on raw log values with season effects, and simulated at
+constant prices by freezing the season of the forecast date. But if
+<span class="math inline">\(\log V = I + y\)</span>, the season effect
+of the raw equation is <span
+class="math inline">\(I_{s+1}-b\,I_s\)</span>, which contains <span
+class="math inline">\(b\)</span> times the market growth of that year:
+freezing it added this growth again in every simulated year, a spurious
+drift equal to <span class="math inline">\(b\)</span> times the market
+growth of the forecast season. In the out-of-sample test the effect was
+small, because the market barely grew in 2019/20, but it would have been
+large for a forecast made after a boom. With deflated values, “real”
+forecasts are <span class="math inline">\(\exp(y+I_{s_0})\)</span>, at
+the market level of the forecast date <span
+class="math inline">\(s_0\)</span>, and “nominal” forecasts add a random
+walk for market inflation, whose drift (<span
+class="math inline">\(4.6\%\)</span> per year) is the slope of the index
+over the seasons, the first season excluded because its rolling averages
+have no history yet, and whose volatility is that of the yearly changes
+of the index.</p>
 <h2 data-number="7.6" id="the-simulation"><span
 class="header-section-number">7.6</span> The simulation</h2>
 <p>For a given player, the algorithm is as follows.</p>
@@ -837,14 +906,26 @@ data-reference="sec:results">8</a> shows that, as described so far, the
 simulation is far too optimistic. The valuation equation is unbiased
 when fed the <em>true</em> future characteristics of a player, so the
 optimism comes from the simulated characteristics. We therefore estimate
-an empirical correction. For about <span
-class="math inline">\(1\,300\)</span> real cases from the training
-period we simulate one year ahead and compare the simulated median
+an empirical correction. For <span class="math inline">\(1\,395\)</span>
+real cases from the training period, balanced across age bands and value
+bands, we simulate one year ahead and compare the simulated median
 change of <span class="math inline">\(\log\)</span> value with the
-realised change net of market inflation; the median gap, by age band and
-tier and shrunk towards the age-band mean, is added to every simulated
-quarter (divided by four). In the out-of-sample test this correction is
-itself estimated with pre-2020 data only.</p>
+realised change net of market inflation. The mean gap in each cell of
+age band <span class="math inline">\(\times\)</span> value band (below
+2, 2–5, 5–20, 20–50 and above 50 million euros), shrunk towards the mean
+of its age band, which is itself shrunk towards the overall median gap,
+is added to every simulated quarter (divided by four), according to the
+value the career has reached <em>at that quarter</em>. We expected the
+gap to depend on the value of the player; in fact the one-year gaps are
+close across value bands (between <span
+class="math inline">\(-0.20\)</span> and <span
+class="math inline">\(-0.09\)</span> in median), so the value band
+changes the correction little. The overestimation of expensive players
+at six years reported in Section <a href="#sec:results"
+data-reference-type="ref" data-reference="sec:results">8</a> therefore
+does not show at a one-year horizon: it builds up over several years. In
+the out-of-sample test this correction is itself estimated with pre-2020
+data only.</p>
 <h1 data-number="8" id="sec:results"><span
 class="header-section-number">8</span> Results</h1>
 <h2 data-number="8.1" id="estimated-transitions"><span
@@ -854,7 +935,7 @@ data-reference="fig:transitions">1</a> shows two of the 84 estimated
 transition matrices, for attacking players aged 23 to 25. The diagonal
 dominates: careers are persistent from one quarter to the next. The
 talent tier changes the picture in the upper states. A Strong player of
-the top tier stays Strong with probability 0.70, whereas in the bottom
+the top tier stays Strong with probability 0.93, whereas in the bottom
 tier the Strong state is fragile and players fall back to Starter or
 Rotation. Injured players mostly return through Rotation, as one would
 expect of a player regaining fitness.</p>
@@ -883,10 +964,10 @@ reads as an injury. His starting distribution is therefore 100% Injured.
 Figure <a href="#fig:example" data-reference-type="ref"
 data-reference="fig:example">3</a> shows the result of <span
 class="math inline">\(10\,000\)</span> simulated careers. The median
-real value is 104 million euros after one year, 92 after three and 42
-after six, with an 80% interval of 20 to 74 million euros in 2032. The
+real value is 100 million euros after one year, 77 after three and 36
+after six, with an 80% interval of 10 to 110 million euros in 2032. The
 probability that he is worth at least 100 million euros four years from
-now is 26%. The right panel shows the mechanism: most careers leave the
+now is 29%. The right panel shows the mechanism: most careers leave the
 Injured state within two quarters, and the share of Strong and Elite
 quarters slowly declines as he moves past 28.</p>
 <figure id="fig:example" data-latex-placement="h">
@@ -917,11 +998,29 @@ class="math inline">\(0.5\)</span>. Table <a href="#tab:backtest"
 data-reference-type="ref" data-reference="tab:backtest">1</a> shows how
 the model improved as its flaws were found and corrected. In reality the
 median player kept only 0.29 of his 2020 value six years later; the
-naive simulation predicted 0.81.</p>
+naive simulation predicted 0.81. The earlier versions were scored in
+current euros, so their forecasts also contained a forecast of market
+inflation, and that forecast turned out to dominate the error. With data
+up to 2020 the season effects grow by 10% a year (the 2015–2019 boom);
+the index estimated on all the data grows by 26% in total between 2020
+and 2026. Moreover the growth was uneven across ages: the median value
+of players aged 24–28 rose by 50% over the period, whereas the value of
+a given player aged 25–27 changed by -16% in total over the same seasons
+(sum of median yearly changes). The tested players age by six years
+during the test, so the general index overstates the inflation of their
+own market. Market inflation is a forecast of its own, which the career
+model cannot be expected to make. The final model is therefore judged at
+2020 prices against the true 2026 value, and Table <a
+href="#tab:backtest" data-reference-type="ref"
+data-reference="tab:backtest">1</a> also reports the comparison with the
+true value deflated by the general index and the forecast in current
+euros.</p>
 <div id="tab:backtest">
 <table>
 <caption>Out-of-sample forecasts from July 2020 to June 2026 (358
-players).</caption>
+players). Earlier versions and the first final line are scored in
+current euros, the last three lines differ only in how market inflation
+is treated (see text).</caption>
 <thead>
 <tr>
 <th style="text-align: left;">Model</th>
@@ -954,12 +1053,34 @@ players).</caption>
 <td style="text-align: center;">0.45</td>
 </tr>
 <tr>
-<td style="text-align: left;"><strong>+ FotMob xG, defence and injuries
-(final)</strong></td>
-<td style="text-align: center;"><strong>0.30</strong></td>
-<td style="text-align: center;"><strong>80%</strong></td>
-<td style="text-align: center;"><strong>-0.03</strong></td>
-<td style="text-align: center;"><strong>0.51</strong></td>
+<td style="text-align: left;">+ complete FotMob data</td>
+<td style="text-align: center;">0.30</td>
+<td style="text-align: center;">80%</td>
+<td style="text-align: center;">-0.03</td>
+<td style="text-align: center;">0.51</td>
+</tr>
+<tr>
+<td style="text-align: left;">Final model, current euros</td>
+<td style="text-align: center;">0.64</td>
+<td style="text-align: center;">69%</td>
+<td style="text-align: center;">+0.71</td>
+<td style="text-align: center;">0.30</td>
+</tr>
+<tr>
+<td style="text-align: left;">Final model, 2020 prices, truth deflated
+by the market index</td>
+<td style="text-align: center;">0.36</td>
+<td style="text-align: center;">74%</td>
+<td style="text-align: center;">+0.33</td>
+<td style="text-align: center;">0.41</td>
+</tr>
+<tr>
+<td style="text-align: left;"><strong>Final model, 2020
+prices</strong></td>
+<td style="text-align: center;"><strong>0.36</strong></td>
+<td style="text-align: center;"><strong>75%</strong></td>
+<td style="text-align: center;"><strong>+0.10</strong></td>
+<td style="text-align: center;"><strong>0.47</strong></td>
 </tr>
 <tr>
 <td style="text-align: left;">True outcome</td>
@@ -974,9 +1095,9 @@ players).</caption>
 <p>The amount of market noise added in the simulation is the one free
 parameter of the forecast intervals. Table <a href="#tab:scale"
 data-reference-type="ref" data-reference="tab:scale">2</a> shows the
-coverage for several values; we retain the value 0.25, whose 80%
-interval covers the truth in 80% of cases. The intervals are wide (the
-upper bound of the 80% interval is on average 12 times the lower bound),
+coverage for several values; we retain the value 1.00, whose 80%
+interval covers the truth in 75% of cases. The intervals are wide (the
+upper bound of the 80% interval is on average 10 times the lower bound),
 which is the honest price of a six-year horizon: Raheem Sterling went
 from 128 to 3 million euros and Sadio Mané from 120 to 6 million between
 the two dates.</p>
@@ -996,41 +1117,54 @@ scale.</caption>
 <tbody>
 <tr>
 <td style="text-align: center;">0.25</td>
-<td style="text-align: center;">52%</td>
-<td style="text-align: center;">80%</td>
-<td style="text-align: center;">89%</td>
-<td style="text-align: center;">12.3</td>
+<td style="text-align: center;">37%</td>
+<td style="text-align: center;">58%</td>
+<td style="text-align: center;">69%</td>
+<td style="text-align: center;">4.8</td>
 </tr>
 <tr>
 <td style="text-align: center;">0.50</td>
-<td style="text-align: center;">53%</td>
-<td style="text-align: center;">82%</td>
-<td style="text-align: center;">90%</td>
-<td style="text-align: center;">13.8</td>
+<td style="text-align: center;">40%</td>
+<td style="text-align: center;">63%</td>
+<td style="text-align: center;">73%</td>
+<td style="text-align: center;">5.8</td>
 </tr>
 <tr>
 <td style="text-align: center;">0.75</td>
-<td style="text-align: center;">56%</td>
-<td style="text-align: center;">85%</td>
-<td style="text-align: center;">92%</td>
-<td style="text-align: center;">16.3</td>
+<td style="text-align: center;">45%</td>
+<td style="text-align: center;">70%</td>
+<td style="text-align: center;">80%</td>
+<td style="text-align: center;">7.6</td>
 </tr>
 <tr>
 <td style="text-align: center;">1.00</td>
-<td style="text-align: center;">58%</td>
-<td style="text-align: center;">87%</td>
-<td style="text-align: center;">94%</td>
-<td style="text-align: center;">20.5</td>
+<td style="text-align: center;">49%</td>
+<td style="text-align: center;">75%</td>
+<td style="text-align: center;">86%</td>
+<td style="text-align: center;">10.3</td>
 </tr>
 </tbody>
 </table>
 </div>
+<p>A second, shorter validation starts in July 2023 and ends in June
+2026 (three years, 372 players drawn in the same way). With the same
+noise scale and at 2023 prices, the 80% interval covers the truth in 84%
+of cases and the bias is +0.08. This second test matters for ingredients
+that exist only from 2020/21, which the 2020 validation cannot see. The
+on/off criterion is such an ingredient. Adding it to the performance
+index changes the mean absolute error of the forecast medians by -0.0008
+(standard error 0.0014) in logarithms over 2023–2026: no measurable
+gain, so it is not retained. Over 2020–2026 the change is -0.0031
+(0.0015); it cannot come from the criterion itself, which does not exist
+before 2020/21, but from the context model, re-estimated with the new
+index on all seasons (see Section <a href="#sec:flaws"
+data-reference-type="ref" data-reference="sec:flaws">9</a>).</p>
 <p>Coverage is similar across value bands (Table <a href="#tab:bands"
 data-reference-type="ref" data-reference="tab:bands">3</a>), but the
-bias changes sign: the model slightly overestimates the future value of
-players already worth more than 20 million euros and underestimates that
-of cheaper players. The overall bias is small only because these two
-errors largely cancel.</p>
+bias is not: it ranges from -0.13 to +0.27, and the forecasts remain too
+high for players already worth more than 20 million euros in 2020. The
+decline of stars is the part of a career that the model captures least
+well.</p>
 <div id="tab:bands">
 <table>
 <caption>Validation by value band.</caption>
@@ -1047,27 +1181,27 @@ errors largely cancel.</p>
 <td style="text-align: left;"><span
 class="math inline">\(&lt;\)</span>5 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">75%</td>
-<td style="text-align: center;">-0.24</td>
+<td style="text-align: center;">74%</td>
+<td style="text-align: center;">-0.13</td>
 </tr>
 <tr>
 <td style="text-align: left;">5-20 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">76%</td>
-<td style="text-align: center;">-0.09</td>
+<td style="text-align: center;">71%</td>
+<td style="text-align: center;">+0.05</td>
 </tr>
 <tr>
 <td style="text-align: left;">20-50 M</td>
 <td style="text-align: center;">100</td>
-<td style="text-align: center;">85%</td>
-<td style="text-align: center;">+0.16</td>
+<td style="text-align: center;">78%</td>
+<td style="text-align: center;">+0.27</td>
 </tr>
 <tr>
 <td style="text-align: left;"><span
 class="math inline">\(&gt;\)</span>50 M</td>
 <td style="text-align: center;">58</td>
-<td style="text-align: center;">84%</td>
-<td style="text-align: center;">+0.12</td>
+<td style="text-align: center;">81%</td>
+<td style="text-align: center;">+0.26</td>
 </tr>
 </tbody>
 </table>
@@ -1084,21 +1218,25 @@ class="header-section-number">9</span> Flaws of the Model</h1>
 <p>The model is a simplification and several of its weaknesses are worth
 stating plainly.</p>
 <p><em>The drift correction is large.</em> Before calibration the
-simulation overstated one-year value changes by roughly 30% in log
-terms. The calibration fixes most of this empirically, and the
-out-of-sample test shows that the corrected forecasts are much better
-centred (mean PIT 0.51 against 0.24), but a correction of that size, and
-the upward bias that remains among players worth more than 20 million
-euros, mean that some mechanism of decline is still missing from the
-simulated characteristics. Likely candidates are the selection of
-players who keep receiving fresh valuations and the coarse modelling of
-what happens outside the top five leagues.</p>
-<p><em>The performance index is still coarse.</em> Expected goals are
-available from 2018/19 only, and FotMob covers the second divisions only
-from 2021/22, so about two thirds of the player-quarters still rely on
-goals plus assists. This is why the Strong and Elite states are hard to
-separate and why defenders and goalkeepers are judged mostly through
-playing time and club strength.</p>
+simulation overstated one-year value changes by <span
+class="math inline">\(16\%\)</span> in log terms (median over the
+calibration cases). The calibration fixes most of this empirically, and
+the out-of-sample test shows that the corrected forecasts are much
+better centred (mean PIT <span class="math inline">\(0.47\)</span>
+against <span class="math inline">\(0.24\)</span>), but a correction of
+that size, which moreover has to depend on the value of the player,
+means that some mechanism of decline is still missing from the simulated
+characteristics. Likely candidates are the selection of players who keep
+receiving fresh valuations and the coarse modelling of what happens
+outside the top five leagues.</p>
+<p><em>The performance index is still coarse.</em> FotMob covers the top
+divisions only from 2018/19 and expected goals only from 2020/21, so
+<span class="math inline">\(31\%\)</span> of the rated player-quarters
+still rely on goals plus assists, and only <span
+class="math inline">\(72\%\)</span> of the player-quarters observed by
+FotMob include expected goals. This is why the Strong and Elite states
+are hard to separate and why defenders and goalkeepers are judged mostly
+through playing time and club strength.</p>
 <p><em>The Markov assumption.</em> Even with age and talent tiers, the
 next state depends on the past only through the current state and class.
 Long injury histories, which raise the risk of recurrence, are captured
@@ -1109,6 +1247,26 @@ the backtest cannot use contract length at all. The revenue figures
 attached to the forecasts (prize money, shirt royalties, sponsorship)
 are scenarios built from public figures [11, 12] and explicit
 assumptions, not predictions.</p>
+<p><em>Off-field incidents are not modelled.</em> The GDELT project
+indexes the world’s press by theme and gives, day by day since 2017, the
+share of articles that mention a name together with themes such as
+arrest, crime or drugs. The signal is real: for Mason Greenwood the
+largest spike falls on 30 January 2022, the day of his arrest, and the
+second on 2 February 2023, when the charges were dropped. But estimating
+the effect of an incident on market value would require this history for
+every player, and the public interface allows about one request every
+five seconds and throttles heavily beyond that. The press check is
+therefore run on demand for the analysed player only, up to the day of
+the analysis, and printed on the report as information; it does not
+enter the simulation.</p>
+<p><em>A small leak in the validation.</em> Every component is
+re-estimated with data up to the forecast date, except the context model
+of the performance index (the two Elo coefficients and the league
+effects), which is estimated once on all seasons. The adjusted index
+used in the validations therefore contains a little information from
+after the forecast date. Its effect is limited to these few
+coefficients, but a strict test would re-estimate them at each forecast
+date.</p>
 <p><em>Survivorship.</em> The validation can only score players who
 still have a market value in 2026; players who retired are excluded,
 which probably makes the test easier than reality.</p>
@@ -1141,12 +1299,16 @@ three. Each correction (league changes, a talent tier updated every
 year, a market level fixed at the forecast date and an empirical drift
 calibration) was found by comparing forecasts with reality, not by
 intuition. After these corrections the 80% forecast intervals contain
-the true value 80% of the time and the overall bias is close to zero. A
-bias that changes sign with the value of the player, upward for the most
-expensive and downward for the cheapest, shows where the model can still
-improve: richer performance data, a better treatment of careers outside
-the top five leagues, and a model of the decline of stars that does not
-rely on an external correction.</p>
+the true value <span class="math inline">\(75\%\)</span> of the time,
+the overall bias is <span class="math inline">\(+0.10\)</span> in
+logarithms and the bias within each value band stays between <span
+class="math inline">\(-0.13\)</span> and <span
+class="math inline">\(+0.27\)</span>. That the decline of stars is
+obtained through an empirical correction, rather than from the mechanics
+of the chain itself, shows where the model can still improve: richer
+performance data, a better treatment of careers outside the top five
+leagues, and a model of the decline of stars that does not rely on an
+external correction.</p>
 <h1 data-number="11" id="appendix"><span
 class="header-section-number">11</span> Appendix</h1>
 <p>The core of the simulation, one quarter for all <span

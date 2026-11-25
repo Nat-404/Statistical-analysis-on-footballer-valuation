@@ -34,10 +34,14 @@ HEADERS = {"User-Agent": "Mozilla/5.0"}                 # on se présente comme 
 CACHE = config.CACHE_DIR / "fotmob"                     # dossier du cache FotMob
 OUT = config.PROCESSED_DIR / "fotmob"                   # dossier des tableaux nettoyés
 
-# Téléchargement massif limité aux saisons AVEC xG (le reste vient de Transfermarkt) :
-# ~22 000 matchs au lieu de ~39 000. Les matchs récents du joueur analysé sont,
+# Téléchargement massif limité aux saisons récentes (le reste vient de Transfermarkt) :
+# ~26 000 matchs au lieu de ~39 000. Les matchs récents du joueur analysé sont,
 # eux, récupérés à la demande au moment de l'analyse.
-FIRST_SEASON_D1 = 2018   # xG disponibles depuis 2018/19
+# Vérifié après collecte : les statistiques de match (passes, duels, défense...)
+# existent dès 2018/19, mais les xG (carte des tirs) seulement à partir de
+# 2020/21 en 1re division, 2021/22 en D2 anglaise et allemande, 2025/26 pour les
+# autres D2. Avant, les colonnes xG sont traitées comme inconnues (quarterly.py).
+FIRST_SEASON_D1 = 2018
 FIRST_SEASON_D2 = 2021   # 2es divisions : 2021/22 et après, pour limiter le volume
 
 # Une session réutilise la même connexion pour toutes les requêtes (plus rapide)

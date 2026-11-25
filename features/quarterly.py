@@ -29,6 +29,7 @@ from collectors import wikipedia as wk
 from features import elo, stakes
 
 OUT_PATH = config.PROCESSED_DIR / "quarterly.parquet"
+ABSENCE_RELIABILITY_PATH = config.PROCESSED_DIR / "absence_reliability.parquet"
 BIG_GAME_ELO_GAP = 100     # adversaire "beaucoup plus fort" : au moins 100 points Elo de plus
 
 
@@ -69,10 +70,14 @@ def tm_quarterly(con, player_ids):
         f"""
         WITH apps AS (
             SELECT a.player_id, a.player_club_id AS club_id, a.date,
-                   -- minutes en CLUB (les sélections nationales sont comptées à part)
+                   -- minutes en CLUB (les sélections nationales viennent de collectors/tournaments.py)
                    CASE WHEN g.competition_type = 'national_team_competition' THEN 0 ELSE a.minutes_played END AS minutes,
-                   CASE WHEN g.competition_type = 'national_team_competition' THEN a.minutes_played ELSE 0 END AS minutes_nat,
-                   a.goals, a.assists, a.yellow_cards, a.red_cards,
+                   (g.competition_type = 'national_team_competition') AS is_national,
+                   -- buts, passes D et cartons en CLUB uniquement (comme les minutes)
+                   CASE WHEN g.competition_type = 'national_team_competition' THEN 0 ELSE a.goals END AS goals,
+                   CASE WHEN g.competition_type = 'national_team_competition' THEN 0 ELSE a.assists END AS assists,
+                   CASE WHEN g.competition_type = 'national_team_competition' THEN 0 ELSE a.yellow_cards END AS yellow_cards,
+                   CASE WHEN g.competition_type = 'national_team_competition' THEN 0 ELSE a.red_cards END AS red_cards,
                    g.competition_id, g.competition_type,
                    {season} AS season, {quarter} AS quarter,
                    -- Elo du club du joueur et de l'adversaire (avant le match)
@@ -91,12 +96,11 @@ def tm_quarterly(con, player_ids):
                -- club principal du trimestre = celui où il a joué le plus de minutes
                arg_max(club_id, minutes)                                                  AS club_id,
                arg_max(competition_id, minutes) FILTER (WHERE competition_type = 'domestic_league') AS league_id,
-               COUNT(*) FILTER (WHERE minutes_nat = 0)                                    AS matches,
-               SUM(CASE WHEN started AND minutes_nat = 0 THEN 1 ELSE 0 END)               AS starts,
+               COUNT(*) FILTER (WHERE NOT is_national)                                    AS matches,
+               SUM(CASE WHEN started AND NOT is_national THEN 1 ELSE 0 END)               AS starts,
                SUM(minutes)                                                               AS minutes,
                SUM(minutes) FILTER (WHERE competition_type = 'domestic_league')           AS minutes_league,
                SUM(minutes) FILTER (WHERE competition_type = 'international_cup')         AS minutes_europe,
-               SUM(minutes_nat)                                                           AS minutes_national,
                SUM(goals) AS goals, SUM(assists) AS assists,
                SUM(yellow_cards) AS yellow, SUM(red_cards) AS red,
                -- contre des adversaires beaucoup plus forts
@@ -248,11 +252,24 @@ FOTMOB_SUMS = {
 }
 
 
+# Statistiques issues de la carte des tirs (xG) : FotMob ne les a qu'à partir de
+# 2020/21 en 1re division (2021/22 en D2 anglaise et allemande, 2025/26 pour les
+# autres D2). Dans un match sans carte des tirs, elles sont INCONNUES (et non nulles).
+XG_COLUMNS = ["xg", "npxg", "xa", "xgot", "xgot_faced"]
+
+# Listes d'absents FotMob : pour certaines saisons (2020/21 à 2023/24), FotMob les a
+# réécrites après coup (joueurs listés chez un club qu'ils avaient quitté, retours
+# prévus des années plus tard). On ne garde une saison que si au moins 70 % de
+# ses absences concernent un joueur réellement au club ce trimestre-là.
+ABSENCE_RELIABILITY = 0.70
+
+
 def fotmob_quarterly():
     # Agrège les stats FotMob par joueur et trimestre, pour toutes les saisons
     # disponibles (complètes ou en cours de téléchargement), 1res et 2es divisions.
+    # Renvoie (agrégats trimestriels, absences match par match à filtrer ensuite).
     if not matching.PLAYER_MAP_PATH.exists():
-        return pd.DataFrame()     # rapprochement pas encore fait : on continue sans FotMob
+        return pd.DataFrame(), pd.DataFrame()     # rapprochement pas encore fait : on continue sans FotMob
     id_map = matching.fm_to_tm()
     frames = []
     for key in {**config.LEAGUES, **config.SECOND_DIVISIONS}:
@@ -266,40 +283,108 @@ def fotmob_quarterly():
             dates = matches.set_index("match_id")["date"]
             p = players.assign(date=pd.to_datetime(players.match_id.map(dates)).dt.tz_localize(None),
                                division=2 if key in config.SECOND_DIVISIONS else 1, league_key=key)
-            # Absences (blessure / suspension) : une ligne par match manqué
-            absences = lineups[lineups.role == "unavailable"][["match_id", "player_id", "absence_type"]]
-            absences = absences.assign(date=pd.to_datetime(absences.match_id.map(dates)).dt.tz_localize(None))
+            # Absences (blessure / suspension) : une ligne par match manqué, avec l'équipe
+            # concernée (pour vérifier ensuite que le joueur y était vraiment)
+            absences = lineups[lineups.role == "unavailable"][["match_id", "team_id", "player_id", "absence_type"]]
+            absences = absences.assign(date=pd.to_datetime(absences.match_id.map(dates)).dt.tz_localize(None),
+                                       league_key=key, fm_season=season)
+            # Joueurs ayant JOUÉ le match : une absence le même jour est une erreur
+            on_sheet = set(zip(players.match_id, players.player_id))
+            absences = absences[[(m, i) not in on_sheet for m, i in zip(absences.match_id, absences.player_id)]]
             frames.append((p, absences))
     if not frames:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     players = pd.concat([f[0] for f in frames], ignore_index=True)
     absences = pd.concat([f[1] for f in frames], ignore_index=True)
     for frame in (players, absences):
         frame["player_id"] = frame.player_id.map(id_map)          # FotMob -> Transfermarkt
         frame.dropna(subset=["player_id"], inplace=True)
+        frame["player_id"] = frame.player_id.astype(int)
         frame["season"] = np.where(frame.date.dt.month >= 8, frame.date.dt.year, frame.date.dt.year - 1)
         frame["quarter"] = frame.date.dt.month.map({m: q for q, ms in config.QUARTERS.items() for m in ms})
 
     cols = {k: v for k, v in FOTMOB_SUMS.items() if v in players.columns}
     players = players.rename(columns={v: k for k, v in cols.items()})
-    # Une case vide FotMob = la stat ne s'est pas produite (ex. aucun tir -> xG vide) -> 0
-    players[list(cols)] = players[list(cols)].apply(pd.to_numeric, errors="coerce").fillna(0)
+    players[list(cols)] = players[list(cols)].apply(pd.to_numeric, errors="coerce")
+    # Le match a-t-il des données xG ? (au moins un joueur avec un xG ou un xA renseigné)
+    xg_present = players[[c for c in ("xg", "xa") if c in players]].notna().any(axis=1)
+    players["match_has_xg"] = xg_present.groupby(players.match_id).transform("any")
+    # Une case vide FotMob = la stat ne s'est pas produite (ex. aucun tir -> xG vide) -> 0,
+    # SAUF les stats xG d'un match sans carte des tirs : elles restent inconnues.
+    other = [c for c in cols if c not in XG_COLUMNS]
+    players[other] = players[other].fillna(0)
+    xg_cols = [c for c in XG_COLUMNS if c in cols]
+    players[xg_cols] = players[xg_cols].fillna(0).where(players.match_has_xg)
+    players["xg_minutes"] = players.fm_minutes.where(players.match_has_xg, 0)
+    # Buts encaissés par le gardien dans les SEULS matchs avec xG (à comparer aux xGOT concédés)
+    if "goals_conceded_gk" in players:
+        players["goals_conceded_gk_xg"] = players.goals_conceded_gk.where(players.match_has_xg)
+        xg_cols = xg_cols + ["goals_conceded_gk_xg"]
     players["rating_x_min"] = pd.to_numeric(players.get("fotmob_rating"), errors="coerce") * players.fm_minutes
 
     keys = ["player_id", "season", "quarter"]
-    agg = players.groupby(keys).agg(
-        **{k: (k, "sum") for k in cols}, rating_x_min=("rating_x_min", "sum"),
+    sums = players.groupby(keys)[other + ["xg_minutes", "rating_x_min"]].sum()
+    xg_sums = players.groupby(keys)[xg_cols].sum(min_count=1)      # inconnu si aucun match avec xG
+    extra = players.groupby(keys).agg(
         fm_matches=("match_id", "nunique"), n_positions=("position_id", "nunique"),
-        minutes_d2=("fm_minutes", lambda s: s[players.loc[s.index, "division"] == 2].sum()),
-    ).reset_index()
+        minutes_d2=("fm_minutes", lambda s: s[players.loc[s.index, "division"] == 2].sum()))
+    agg = pd.concat([sums, xg_sums, extra], axis=1).reset_index()
     agg["rating"] = agg.pop("rating_x_min") / agg.fm_minutes.replace(0, np.nan)
+    return agg, absences
 
-    miss = (absences.assign(injury=absences.absence_type.eq("injury"),
-                            suspension=absences.absence_type.eq("suspension"))
-            .groupby(keys)[["injury", "suspension"]].sum()
-            .rename(columns={"injury": "missed_injury", "suspension": "missed_suspension"}).reset_index())
-    return agg.merge(miss, on=keys, how="outer")
+
+def absences_quarterly(absences, clubs):
+    # Matchs manqués (blessure / suspension) par joueur et trimestre, en ne gardant
+    # que les absences FIABLES : l'équipe FotMob est bien le club Transfermarkt du
+    # joueur ce trimestre-là, dans une saison dont les listes d'absents sont cohérentes.
+    # Une saison non fiable -> valeur inconnue (NaN), et non "aucune blessure".
+    keys = ["player_id", "season", "quarter"]
+    club_map = pd.read_parquet(matching.CLUB_MAP_PATH)
+    a = absences.assign(tm_club=absences.team_id.map(dict(zip(club_map.fm_team_id, club_map.tm_club_id))))
+    a = a.merge(clubs, on=keys, how="left")
+    known = a.tm_club.notna() & a.club_id.notna()
+    a["consistent"] = known & (a.tm_club == a.club_id)
+    rate = a[known].groupby(["league_key", "fm_season"]).consistent.mean()
+    reliable = rate[rate >= ABSENCE_RELIABILITY].index
+    a = a[a.set_index(["league_key", "fm_season"]).index.isin(reliable) & a.consistent]
+    miss = (a.assign(missed_injury=a.absence_type.eq("injury"), missed_suspension=a.absence_type.eq("suspension"))
+            .groupby(keys)[["missed_injury", "missed_suspension"]].sum().reset_index())
+    return miss, rate
+
+
+def tournament_quarterly():
+    # Minutes jouées en grand tournoi de sélections (FotMob, 2014 -> aujourd'hui),
+    # par joueur Transfermarkt et trimestre.
+    from collectors import tournaments as tn
+    if not tn.OUT_PATH.exists():
+        print("⚠ tournois non collectés (python -m collectors.tournaments) : minutes en sélection = 0")
+        return pd.DataFrame(columns=["player_id", "season", "quarter", "minutes_national"])
+    t = tn.load().dropna(subset=["tm_player_id"])
+    t["player_id"] = t.tm_player_id.astype(int)
+    t["season"] = np.where(t.date.dt.month >= 8, t.date.dt.year, t.date.dt.year - 1)
+    t["quarter"] = t.date.dt.month.map({m: q for q, ms in config.QUARTERS.items() for m in ms})
+    return (t.groupby(["player_id", "season", "quarter"]).minutes.sum()
+            .rename("minutes_national").reset_index())
+
+
+def _reliable_quarters(reliable):
+    # (joueur, saison, trimestre) appartenant à une saison FotMob aux absences fiables :
+    # on les repère via les matchs de ces saisons (joueurs présents sur les feuilles).
+    rows = []
+    for key, season in reliable:
+        matches, players, _, _ = fm.load_season(key, season)
+        d = pd.to_datetime(matches.set_index("match_id")["date"]).dt.tz_localize(None)
+        p = players[["match_id", "player_id"]].assign(date=players.match_id.map(d))
+        rows.append(p)
+    if not rows:
+        return set()
+    p = pd.concat(rows)
+    p["player_id"] = p.player_id.map(matching.fm_to_tm())
+    p = p.dropna(subset=["player_id", "date"])
+    season = np.where(p.date.dt.month >= 8, p.date.dt.year, p.date.dt.year - 1)
+    quarter = p.date.dt.month.map({m: q for q, ms in config.QUARTERS.items() for m in ms})
+    return set(zip(p.player_id.astype(int), season, quarter))
 
 
 def wiki_quarterly():
@@ -332,9 +417,22 @@ def build():
     df = df.merge(team_league_games(con), on=["club_id", "season", "quarter"], how="left")
     df = attach_transfers(df, con)
 
-    fmq = fotmob_quarterly()
+    fmq, absences = fotmob_quarterly()
     if not fmq.empty:
         df = df.merge(fmq, on=keys, how="left")
+        miss, rate = absences_quarterly(absences, df[keys + ["club_id"]].dropna())
+        rate.rename("consistent_share").reset_index().to_parquet(ABSENCE_RELIABILITY_PATH)
+        df = df.merge(miss, on=keys, how="left")
+        # Absences connues seulement pour les trimestres couverts par une saison FIABLE :
+        # ailleurs, la colonne reste vide (inconnue) même si FotMob a des stats de match.
+        # (trimestres où le joueur a joué un match d'une saison fiable, ou y a une absence fiable)
+        covered = _reliable_quarters(set(rate[rate >= ABSENCE_RELIABILITY].index))
+        known = df.set_index(keys).index.isin(covered) | df.missed_injury.notna()
+        for col in ("missed_injury", "missed_suspension"):
+            df[col] = df[col].fillna(0).where(known)
+        from features import onoff
+        df = df.merge(onoff.build(), on=keys, how="left")
+    df = df.merge(tournament_quarterly(), on=keys, how="left")
     df = df.merge(wiki_quarterly(), on=keys, how="left")
     df = df.merge(player_profiles(con), on="player_id", how="left")
 

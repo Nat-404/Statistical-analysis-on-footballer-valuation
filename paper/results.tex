@@ -1,6 +1,6 @@
 
 \subsection{Estimated transitions}
-Figure~\ref{fig:transitions} shows two of the 84 estimated transition matrices, for attacking players aged 23 to 25. The diagonal dominates: careers are persistent from one quarter to the next. The talent tier changes the picture in the upper states. A Strong player of the top tier stays Strong with probability 0.70, whereas in the bottom tier the Strong state is fragile and players fall back to Starter or Rotation. Injured players mostly return through Rotation, as one would expect of a player regaining fitness.
+Figure~\ref{fig:transitions} shows two of the 84 estimated transition matrices, for attacking players aged 23 to 25. The diagonal dominates: careers are persistent from one quarter to the next. The talent tier changes the picture in the upper states. A Strong player of the top tier stays Strong with probability 0.93, whereas in the bottom tier the Strong state is fragile and players fall back to Starter or Rotation. Injured players mostly return through Rotation, as one would expect of a player regaining fitness.
 
 \begin{figure}[h]
 \centering
@@ -19,7 +19,7 @@ The Elo ratings computed with the conservation rule of Proposition~\ref{prop:elo
 \end{figure}
 
 \subsection{An example: Bukayo Saka}
-Bukayo Saka was 25.2 years old at the start of the forecast and valued at 110 million euros. The on-demand update downloads his 7 league matches of 2026/27: he played 83\% of available minutes in August--October, then disappeared from every team sheet, which the model reads as an injury. His starting distribution is therefore 100\% Injured. Figure~\ref{fig:example} shows the result of $10\,000$ simulated careers. The median real value is 104 million euros after one year, 92 after three and 42 after six, with an 80\% interval of 20 to 74 million euros in 2032. The probability that he is worth at least 100 million euros four years from now is 26\%. The right panel shows the mechanism: most careers leave the Injured state within two quarters, and the share of Strong and Elite quarters slowly declines as he moves past 28.
+Bukayo Saka was 25.2 years old at the start of the forecast and valued at 110 million euros. The on-demand update downloads his 7 league matches of 2026/27: he played 83\% of available minutes in August--October, then disappeared from every team sheet, which the model reads as an injury. His starting distribution is therefore 100\% Injured. Figure~\ref{fig:example} shows the result of $10\,000$ simulated careers. The median real value is 100 million euros after one year, 77 after three and 36 after six, with an 80\% interval of 10 to 110 million euros in 2032. The probability that he is worth at least 100 million euros four years from now is 29\%. The right panel shows the mechanism: most careers leave the Injured state within two quarters, and the share of Strong and Elite quarters slowly declines as he moves past 28.
 
 \begin{figure}[h]
 \centering
@@ -31,7 +31,7 @@ Bukayo Saka was 25.2 years old at the start of the forecast and valued at 110 mi
 \subsection{Out-of-sample validation}
 A model of this kind can always be made to look plausible on a few famous names. The only honest test is to forecast the past. We therefore placed ourselves in July 2020: every component (the hidden Markov model, the valuation equations, the event probabilities, the team-contribution model and the drift calibration) was re-estimated with data available at that date only. We then simulated six years ahead for 358 players of the top five leagues, aged 18 to 32 and worth at least one million euros, stratified by value, and compared the forecasts with their true Transfermarkt values in June 2026.
 
-Three numbers summarise a probabilistic forecast. The \emph{coverage} of the 80\% interval should be close to 80\%. The \emph{bias} is the mean of $\log(\text{forecast median}/\text{truth})$, ideally zero. The \emph{PIT} is the fraction of simulated careers below the true value; if the forecasts are well calibrated it is uniformly distributed, with mean $0.5$. Table~\ref{tab:backtest} shows how the model improved as its flaws were found and corrected. In reality the median player kept only 0.29 of his 2020 value six years later; the naive simulation predicted 0.81.
+Three numbers summarise a probabilistic forecast. The \emph{coverage} of the 80\% interval should be close to 80\%. The \emph{bias} is the mean of $\log(\text{forecast median}/\text{truth})$, ideally zero. The \emph{PIT} is the fraction of simulated careers below the true value; if the forecasts are well calibrated it is uniformly distributed, with mean $0.5$. Table~\ref{tab:backtest} shows how the model improved as its flaws were found and corrected. In reality the median player kept only 0.29 of his 2020 value six years later; the naive simulation predicted 0.81. The earlier versions were scored in current euros, so their forecasts also contained a forecast of market inflation, and that forecast turned out to dominate the error. With data up to 2020 the season effects grow by 10\% a year (the 2015--2019 boom); the index estimated on all the data grows by 26\% in total between 2020 and 2026. Moreover the growth was uneven across ages: the median value of players aged 24--28 rose by 50\% over the period, whereas the value of a given player aged 25--27 changed by -16\% in total over the same seasons (sum of median yearly changes). The tested players age by six years during the test, so the general index overstates the inflation of their own market. Market inflation is a forecast of its own, which the career model cannot be expected to make. The final model is therefore judged at 2020 prices against the true 2026 value, and Table~\ref{tab:backtest} also reports the comparison with the true value deflated by the general index and the forecast in current euros.
 
 \begin{table}[h]
 \centering
@@ -42,16 +42,20 @@ Model & value ratio 2026/2020 & 80\% coverage & bias (log) & mean PIT \\
 Naive simulation & 0.81 & 63\% & +0.99 & 0.24 \\
 + league changes, yearly talent tier & 0.70 & 70\% & +0.90 & 0.28 \\
 + drift calibration & 0.39 & 83\% & +0.22 & 0.45 \\
-\textbf{+ FotMob xG, defence and injuries (final)} & \textbf{0.30} & \textbf{80\%} & \textbf{-0.03} & \textbf{0.51} \\
++ complete FotMob data & 0.30 & 80\% & -0.03 & 0.51 \\
+\midrule
+Final model, current euros & 0.64 & 69\% & +0.71 & 0.30 \\
+Final model, 2020 prices, truth deflated by the market index & 0.36 & 74\% & +0.33 & 0.41 \\
+\textbf{Final model, 2020 prices} & \textbf{0.36} & \textbf{75\%} & \textbf{+0.10} & \textbf{0.47} \\
 \midrule
 True outcome & 0.29 & 80\% & 0 & 0.50 \\
 \bottomrule
 \end{tabular}
-\caption{Out-of-sample forecasts from July 2020 to June 2026 (358 players).}
+\caption{Out-of-sample forecasts from July 2020 to June 2026 (358 players). Earlier versions and the first final line are scored in current euros, the last three lines differ only in how market inflation is treated (see text).}
 \label{tab:backtest}
 \end{table}
 
-The amount of market noise added in the simulation is the one free parameter of the forecast intervals. Table~\ref{tab:scale} shows the coverage for several values; we retain the value 0.25, whose 80\% interval covers the truth in 80\% of cases. The intervals are wide (the upper bound of the 80\% interval is on average 12 times the lower bound), which is the honest price of a six-year horizon: Raheem Sterling went from 128 to 3 million euros and Sadio Man\'e from 120 to 6 million between the two dates.
+The amount of market noise added in the simulation is the one free parameter of the forecast intervals. Table~\ref{tab:scale} shows the coverage for several values; we retain the value 1.00, whose 80\% interval covers the truth in 75\% of cases. The intervals are wide (the upper bound of the 80\% interval is on average 10 times the lower bound), which is the honest price of a six-year horizon: Raheem Sterling went from 128 to 3 million euros and Sadio Man\'e from 120 to 6 million between the two dates.
 
 \begin{table}[h]
 \centering
@@ -59,17 +63,21 @@ The amount of market noise added in the simulation is the one free parameter of 
 \toprule
 noise scale & 50\% coverage & 80\% coverage & 90\% coverage & width of 80\% interval (ratio) \\
 \midrule
-0.25 & 52\% & 80\% & 89\% & 12.3 \\
-0.50 & 53\% & 82\% & 90\% & 13.8 \\
-0.75 & 56\% & 85\% & 92\% & 16.3 \\
-1.00 & 58\% & 87\% & 94\% & 20.5 \\
+0.25 & 37\% & 58\% & 69\% & 4.8 \\
+0.50 & 40\% & 63\% & 73\% & 5.8 \\
+0.75 & 45\% & 70\% & 80\% & 7.6 \\
+1.00 & 49\% & 75\% & 86\% & 10.3 \\
 \bottomrule
 \end{tabular}
 \caption{Coverage of the forecast intervals as a function of the noise scale.}
 \label{tab:scale}
 \end{table}
 
-Coverage is similar across value bands (Table~\ref{tab:bands}), but the bias changes sign: the model slightly overestimates the future value of players already worth more than 20 million euros and underestimates that of cheaper players. The overall bias is small only because these two errors largely cancel.
+
+
+A second, shorter validation starts in July 2023 and ends in June 2026 (three years, 372 players drawn in the same way). With the same noise scale and at 2023 prices, the 80\% interval covers the truth in 84\% of cases and the bias is +0.08. This second test matters for ingredients that exist only from 2020/21, which the 2020 validation cannot see. The on/off criterion is such an ingredient. Adding it to the performance index changes the mean absolute error of the forecast medians by -0.0008 (standard error 0.0014) in logarithms over 2023--2026: no measurable gain, so it is not retained. Over 2020--2026 the change is -0.0031 (0.0015); it cannot come from the criterion itself, which does not exist before 2020/21, but from the context model, re-estimated with the new index on all seasons (see Section~\ref{sec:flaws}).
+
+Coverage is similar across value bands (Table~\ref{tab:bands}), but the bias is not: it ranges from -0.13 to +0.27, and the forecasts remain too high for players already worth more than 20 million euros in 2020. The decline of stars is the part of a career that the model captures least well.
 
 \begin{table}[h]
 \centering
@@ -77,10 +85,10 @@ Coverage is similar across value bands (Table~\ref{tab:bands}), but the bias cha
 \toprule
 value in 2020 & players & 80\% coverage & bias (log) \\
 \midrule
-$<$5\,M & 100 & 75\% & -0.24 \\
-5-20\,M & 100 & 76\% & -0.09 \\
-20-50\,M & 100 & 85\% & +0.16 \\
-$>$50\,M & 58 & 84\% & +0.12 \\
+$<$5\,M & 100 & 74\% & -0.13 \\
+5-20\,M & 100 & 71\% & +0.05 \\
+20-50\,M & 100 & 78\% & +0.27 \\
+$>$50\,M & 58 & 81\% & +0.26 \\
 \bottomrule
 \end{tabular}
 \caption{Validation by value band.}

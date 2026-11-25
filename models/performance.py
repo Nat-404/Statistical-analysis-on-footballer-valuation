@@ -8,8 +8,14 @@
 #    de la moyenne des joueurs du même poste, la même saison, dans les 5 grands
 #    championnats. 0 = joueur moyen du poste ; +1 = nettement au-dessus ; +2 = élite.
 #    L'indice est la moyenne pondérée des z-scores.
-#    Sans données FotMob (avant 2015, ou saison pas encore téléchargée), on se
-#    rabat sur les buts + passes décisives de Transfermarkt pour les joueurs offensifs.
+#    Sans données FotMob (avant 2018/19 en 1re division, 2021/22 en 2e division),
+#    on se rabat sur les buts + passes décisives de Transfermarkt pour les
+#    joueurs offensifs. Les stats xG n'existent qu'à partir de 2020/21 : avant,
+#    l'indice repose sur les autres critères (passes, duels, actions défensives).
+#    Critère collectif "on/off" (features/onoff.py : différence d'xG de l'équipe
+#    avec lui sur le terrain moins sans lui) : calculé (onoff_90), mais NON
+#    retenu dans l'indice. Testé en validation 2020 -> 2026 et 2023 -> 2026
+#    (python -m evaluation.ablation onoff), il n'améliore pas les prévisions.
 #
 # B. FACTEUR CLUB (le contexte)
 #    Un joueur d'une équipe dominante a des stats gonflées ; un joueur d'une
@@ -21,6 +27,8 @@
 #    l'"indice ajusté", qui mesure le joueur lui-même.
 # =============================================================================
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import statsmodels.formula.api as smf
@@ -29,6 +37,7 @@ import config
 from features import quarterly as qt
 
 OUT_PATH = config.PROCESSED_DIR / "performance.parquet"
+CONTEXT_PATH = config.PROCESSED_DIR / "performance_context.json"   # coefficients du facteur club
 MIN_MINUTES_REFERENCE = 270     # minutes minimales pour entrer dans la population de référence
 
 # Regroupement des postes Transfermarkt en 6 familles
@@ -69,8 +78,10 @@ def compute_metrics(df):
     def ratio(a, b):
         return get(a) / get(b).where(get(b) > 0)
 
+    # Les stats xG se rapportent aux seules minutes jouées dans des matchs avec xG
+    per90_xg = 90 / get("xg_minutes").where(get("xg_minutes") > 0)
     if per90 is not None:
-        m["goals_prevented_90"] = (get("xgot_faced") - get("goals_conceded_gk")) * per90
+        m["goals_prevented_90"] = (get("xgot_faced") - get("goals_conceded_gk_xg")) * per90_xg
         m["save_pct"] = get("saves") / (get("saves") + get("goals_conceded_gk")).where(lambda s: s > 0)
         m["pass_pct"] = ratio("passes_acc", "passes_tot")
         m["long_pct"] = ratio("long_acc", "long_tot")
@@ -81,10 +92,10 @@ def compute_metrics(df):
         m["dribbled_past_90"] = get("dribbled_past") * per90
         m["final_third_90"] = get("final_third_passes") * per90
         m["errors_90"] = get("errors_to_goal") * per90
-        m["xg_xa_90"] = (get("xg") + get("xa")) * per90
-        m["xa_90"] = get("xa") * per90
-        m["npxg_90"] = get("npxg") * per90
-        m["xgot_90"] = get("xgot") * per90
+        m["xg_xa_90"] = (get("xg") + get("xa")) * per90_xg
+        m["xa_90"] = get("xa") * per90_xg
+        m["npxg_90"] = get("npxg") * per90_xg
+        m["xgot_90"] = get("xgot") * per90_xg
         m["chances_90"] = get("chances_created") * per90
         m["big_chances_90"] = get("big_chances_created") * per90
         m["dribbles_90"] = get("dribbles_acc") * per90
@@ -92,6 +103,9 @@ def compute_metrics(df):
         m["recoveries_90"] = get("recoveries") * per90
         m["shots_90"] = get("shots") * per90
         m["aerial_won_90"] = get("aerial_won") * per90
+    if "oo_on_min" in df:
+        from features import onoff
+        m["onoff_90"] = onoff.onoff_xgd_90(df)
     # Repli Transfermarkt : buts + passes décisives par 90 minutes
     m["ga_90"] = (df["goals"] + df["assists"]) * 90 / df["minutes"].where(df["minutes"] > 0)
     return m
@@ -128,6 +142,13 @@ def performance_index(df):
             total = total + (w * z).where(z.notna() & rows, 0)
             weight_sum = weight_sum + pd.Series(abs(w), index=df.index).where(z.notna() & rows, 0)
         index[rows] = (total / weight_sum.where(weight_sum > 0))[rows]
+    # Une moyenne de plusieurs z-scores a un écart-type INFÉRIEUR à 1 (environ 0,6 ici),
+    # alors que l'indice de repli (buts + passes D) est un z-score simple (écart-type 1).
+    # Sans correction, les saisons sans FotMob (2014-2017) paraîtraient deux fois plus
+    # dispersées et la chaîne de Markov cachée prendrait cette dispersion pour des
+    # états "Fort" / "Élite". On re-standardise donc l'indice composite : 0 = joueur
+    # moyen du poste, 1 = un écart-type de la population de référence, comme le repli.
+    index = _zscore_within(index, fm_ref, groups)
     df["perf_source"] = np.where(index.notna(), "fotmob", None)
 
     # Repli : buts + passes D (offensifs seulement ; pour les défenseurs et
@@ -155,8 +176,15 @@ def fit_context(df):
     d["league"] = d.league_id.where(d.league_id.map(counts) >= 500, "autre").fillna("autre")
     d["own_c"] = (d.own_elo - 1600) / 100          # en centaines de points Elo, centré
     d["opp_c"] = (d.opp_elo - 1600) / 100
-    model = smf.mixedlm("perf ~ own_c + opp_c + C(league)", d, groups=d["player_id"],
-                        re_formula="1").fit(method=["lbfgs", "powell"], maxiter=500)
+    # L'optimiseur essaie en chemin des points où la variance de l'effet joueur est
+    # nulle, d'où un avertissement "covariance singulière" sans conséquence : on le
+    # masque, mais on VÉRIFIE que l'estimation finale a convergé avec une variance > 0.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Random effects covariance is singular")
+        model = smf.mixedlm("perf ~ own_c + opp_c + C(league)", d, groups=d["player_id"],
+                            re_formula="1").fit(method=["lbfgs", "powell"], maxiter=500)
+    if not model.converged or float(model.cov_re.iloc[0, 0]) <= 0:
+        raise RuntimeError("Le modèle de contexte n'a pas convergé correctement")
     return model
 
 
@@ -186,6 +214,9 @@ def build():
     keep = ["player_id", "season", "quarter", "t", "pos_group", "perf", "perf_adj", "perf_context",
             "perf_source", "perf_minutes"]
     df[keep].to_parquet(OUT_PATH)
+    import json
+    CONTEXT_PATH.write_text(json.dumps({"own": float(model.params["own_c"]), "opp": float(model.params["opp_c"]),
+                                        "n": int(model.nobs)}))
     return df, model
 
 

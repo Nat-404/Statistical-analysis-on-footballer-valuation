@@ -79,10 +79,11 @@ def fit(cutoff_t=None, states=None):
     stay = d[~d.moved & d.prev_elo.notna() & d.own_elo.notna()]
     elo_sd = float((stay.own_elo - stay.prev_elo).std())
 
-    # 3. Sélection nationale. Transfermarkt ne contient que les matchs de GRANDS
-    #    TOURNOIS (Coupe du monde, Euro, Copa América...). On mesure donc la proba
-    #    de jouer un tournoi, état x âge, sur les seuls trimestres de tournoi
-    #    (ceux où au moins 1 % des joueurs ont joué en sélection).
+    # 3. Sélection nationale. On dispose des GRANDS TOURNOIS (Coupe du monde, Euro,
+    #    Copa América, Coupes d'Afrique et d'Asie, 2014-2026, via FotMob :
+    #    collectors/tournaments.py). On mesure la proba de jouer un tournoi,
+    #    état x âge, sur les seuls trimestres de tournoi (ceux où au moins 1 %
+    #    des joueurs ont joué en sélection).
     df["plays_national"] = df.minutes_national > 0
     share_by_quarter = df.groupby("t").plays_national.mean()
     tournament_t = share_by_quarter[share_by_quarter > 0.01].index

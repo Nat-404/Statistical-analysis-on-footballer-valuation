@@ -184,16 +184,27 @@ def histogram(ax, final, v0):
     ax.tick_params(labelsize=8.5)
 
 
-def reliability():
-    # Résultats de la validation sur le passé (2020 -> 2026), s'ils existent
+BACKTEST_BANDS = [(5e6, "<5M", "below €5m"), (20e6, "5-20M", "€5–20m"), (50e6, "20-50M", "€20–50m"),
+                  (float("inf"), ">50M", "above €50m")]
+
+
+def reliability(v0):
+    # Résultats de la validation sur le passé (2020 -> 2026), au niveau de bruit utilisé,
+    # au total et pour la tranche de valeur du joueur analysé.
     path = config.PROCESSED_DIR / "backtest.parquet"
     if not path.exists():
         return None
     from evaluation import backtest as bt
     from simulation import monte_carlo as mc
-    by_scale, _, _ = bt.report(pd.read_parquet(path))
-    row = by_scale.loc[mc.RESID_SCALE] if mc.RESID_SCALE in by_scale.index else by_scale.iloc[-1]
-    return {"coverage": row.couverture_80, "bias": row.biais_log, "players": int(row.joueurs)}
+    results = pd.read_parquet(path)
+    results = results[results.scale == mc.RESID_SCALE] if mc.RESID_SCALE in set(results.scale) else results
+    by_scale, by_band, _ = bt.report(results)
+    row = by_scale.iloc[0]
+    key, label = next((k, lab) for limit, k, lab in BACKTEST_BANDS if v0 < limit)
+    band = by_band.loc[key] if key in by_band.index else None
+    return {"coverage": row.couverture_80, "bias": row.biais_log, "players": int(row.joueurs),
+            "band_label": label, "band_bias": None if band is None else band.biais_log,
+            "band_coverage": None if band is None else band.couverture_80}
 
 
 # -----------------------------------------------------------------------------
@@ -214,7 +225,8 @@ def last_season_stats(profile, panel_rows):
     return stats
 
 
-def build_fiche(player_id, ctx, sim, live=None, path=None, sim_date=None):
+def build_fiche(player_id, ctx, sim, live=None, path=None, sim_date=None, press=None):
+    # press : contrôle presse GDELT (collectors/gdelt.py), affiché page 2 à titre d'information
     sim_date = pd.Timestamp(sim_date or dt.date.today())
     profile = tm.query(
         "SELECT name, date_of_birth, sub_position, current_club_name, country_of_citizenship, foot, height_in_cm, "
@@ -245,7 +257,7 @@ def build_fiche(player_id, ctx, sim, live=None, path=None, sim_date=None):
     path = path or config.OUTPUTS_DIR / f"{profile['name'].replace(' ', '_')}_projection.pdf"
     with PdfPages(path) as pdf:
         _page_one(pdf, profile, stats, youth, value_hist, last, meta, v0, age0, sim_date, ctx, years, values)
-        _page_two(pdf, sim, years, values, nominal, share, v0)
+        _page_two(pdf, sim, years, values, nominal, share, v0, press)
     return path
 
 
@@ -314,7 +326,8 @@ def _page_one(pdf, profile, stats, youth, value_hist, last, meta, v0, age0, sim_
     age_bin = int(np.digitize(meta["age0"], hmm.AGE_BINS[1:-1]))
     p_move_year = 1 - np.prod(1 - ev["move"][int(order[0]), age_bin, :])
     dest = ev["destination"][age_bin, meta["tier"]]
-    drift = ctx.drift[age_bin, meta["tier"]] if ctx.drift is not None else 0.0
+    from simulation import calibration
+    drift = ctx.drift[age_bin, int(calibration.value_band(v0))] if ctx.drift is not None else 0.0
     renew = ev["contract"]["renewal_prob_per_year"]
     from simulation import monte_carlo as mc
     infl = val["inflation"]
@@ -328,7 +341,8 @@ def _page_one(pdf, profile, stats, youth, value_hist, last, meta, v0, age0, sim_
         ["Transfer within a year / leaves top five if moved", f"{pct(p_move_year)} / {pct(dest[2])}", "Transfermarkt 2014–2026"],
         ["Contract renewal per year", f"{pct(renew['Rotation'])} (Rotation) to {pct(renew['Élite'])} (Elite)", "assumption"],
         ["Market inflation", f"+{(np.exp(infl['drift']) - 1) * 100:.1f}%/yr (s.d. {infl['vol'] * 100:.1f}%)", "season effects"],
-        ["Market noise · drift correction", f"{mc.RESID_SCALE:.2f} · {(np.exp(drift) - 1) * 100:+.1f}%/yr", "validation 2020→2026"],
+        ["Market noise · drift correction at T0", f"{mc.RESID_SCALE:.2f} · {(np.exp(drift) - 1) * 100:+.1f}%/yr",
+         "age × value band"],
     ]
     pg.table("Table 2 — Assumptions", ["Assumption", "Value", "Source"], assumptions,
              [0.42, 0.34, 0.24], aligns=["left", "left", "left"], size=8.4, row_h=0.0168)
@@ -353,13 +367,13 @@ def _page_one(pdf, profile, stats, youth, value_hist, last, meta, v0, age0, sim_
     pg.save()
 
 
-def _page_two(pdf, sim, years, values, nominal, share, v0):
+def _page_two(pdf, sim, years, values, nominal, share, v0, press=None):
     pg = Page(pdf, 2)
     pg.y = 0.955
     final = values[:, -1]
 
     # Figure 2 — histogram
-    ax = pg.axes(0.14)
+    ax = pg.axes(0.125)
     histogram(ax, final / 1e6, v0 / 1e6)
     pg.caption("Figure 2 — Distribution of the simulated market value six years after T0 (10,000 careers).")
     skew = "well above" if final.mean() > 1.15 * np.median(final) else "close to"
@@ -385,9 +399,10 @@ def _page_two(pdf, sim, years, values, nominal, share, v0):
     pg.y -= 0.014
 
     # Figure 3 — playing time
-    ax = pg.axes(0.12)
-    monte_carlo_paths(ax, years, share * 100, "playing time (%, 4-quarter avg.)", ylim=(0, 100))
-    pg.caption("Figure 3 — The 10,000 simulated paths of the share of league minutes, with the mean and median paths.")
+    ax = pg.axes(0.105)
+    monte_carlo_paths(ax, years, share * 100, "playing time (%)", ylim=(0, 100))
+    pg.caption("Figure 3 — The 10,000 simulated paths of the share of league minutes (4-quarter average), "
+               "with the mean and median paths.")
     s0, s2, s6 = share[0, 0], np.median(share[:, 8]), np.median(share[:, -1])
     pg.text(f"Median playing time moves from {pct(s0)} (last four quarters) to {pct(s2)} in two years and {pct(s6)} "
             f"in six. Playing time is the main driver of value: a player who does not become a regular starter sees "
@@ -415,11 +430,18 @@ def _page_two(pdf, sim, years, values, nominal, share, v0):
             f"years. Revenue figures are orders of magnitude based on public data (UEFA, Premier League, Deloitte) "
             f"and explicit assumptions.", size=9)
 
-    rel = reliability()
+    rel = reliability(v0)
     if rel:
         pg.y -= 0.004
+        band = (f" For players valued {rel['band_label']} in 2020: coverage {pct(rel['band_coverage'])}, "
+                f"bias {rel['band_bias']:+.2f}." if rel["band_bias"] is not None else "")
         pg.text(f"Reliability — Out-of-sample validation (models re-estimated in July 2020 and compared with true "
                 f"values in June 2026, {rel['players']} players): the P10–P90 interval contains the true value in "
-                f"{pct(rel['coverage'])} of cases; residual bias {rel['bias']:+.2f} (log), the model remaining "
-                f"slightly optimistic for the most valuable players.", size=8.2, style="italic", color="#333333")
+                f"{pct(rel['coverage'])} of cases (2020 prices); mean bias {rel['bias']:+.2f} (log of "
+                f"forecast median over truth)."
+                + band, size=8.2, style="italic", color="#333333")
+    if press is not None:
+        from collectors import gdelt
+        pg.y -= 0.004
+        pg.text(gdelt.summary_en(press), size=8.2, style="italic", color="#333333")
     pg.save()
